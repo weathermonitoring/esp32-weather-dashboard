@@ -113,6 +113,7 @@
         .temp-humid {
             display: flex;
             gap: 30px;
+            flex-wrap: wrap;
         }
         .metric {
             text-align: center;
@@ -243,7 +244,7 @@
             </div>
         </section>
         <section id="chart-section">
-            <h2>Humidity Trend</h2>
+            <h2>Humidity & Rain Trend</h2>
             <canvas id="humidity-chart"></canvas>
         </section>
     </main>
@@ -260,8 +261,10 @@
 
         let humidityChart;
         let isCelsius = true; // we assume ESP sends °C
-        let currentData = { temp: null, hum: null };
-        let recentReadings = []; // { time, temp, hum }
+        // include rain here
+        let currentData = { temp: null, hum: null, rain: null };
+        // { time, temp, hum, rain }
+        let recentReadings = [];
 
         // ---------- Chart init ----------
         function initChart() {
@@ -269,14 +272,24 @@
                 type: 'line',
                 data: {
                     labels: [],
-                    datasets: [{
-                        label: 'Humidity (%)',
-                        data: [],
-                        borderColor: '#4CAF50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
-                        fill: true,
-                        tension: 0.4
-                    }]
+                    datasets: [
+                        {
+                            label: 'Humidity (%)',
+                            data: [],
+                            borderColor: '#4CAF50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: 'Rain (%)',
+                            data: [],
+                            borderColor: '#2196F3',
+                            backgroundColor: 'rgba(33, 150, 243, 0.15)',
+                            fill: true,
+                            tension: 0.4
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -284,11 +297,19 @@
                         legend: { display: true }
                     },
                     scales: {
-                        y: { beginAtZero: true, title: { display: true, text: 'Humidity (%)' } },
+                        y: { beginAtZero: true, max: 100, title: { display: true, text: 'Percentage (%)' } },
                         x: { title: { display: true, text: 'Time' } }
                     }
                 }
             });
+        }
+
+        // ---------- Rain helpers ----------
+        function getRainLabel(percent) {
+            if (percent == null || isNaN(percent)) return 'N/A';
+            if (percent < 10) return 'Dry';
+            if (percent < 50) return 'Light';
+            return 'Heavy';
         }
 
         // ---------- UI helpers ----------
@@ -298,6 +319,8 @@
             const temp = isCelsius ? currentData.temp : (currentData.temp * 9/5 + 32);
             const tempRounded = Math.round(temp);
             const unit = isCelsius ? '°C' : '°F';
+            const rainValue = currentData.rain != null ? Math.round(currentData.rain) : 'N/A';
+            const rainLabel = getRainLabel(currentData.rain);
 
             weatherContent.innerHTML = `
                 <div class="weather-card">
@@ -312,9 +335,14 @@
                             <span id="humidity">${Math.round(currentData.hum)}%</span>
                             <p>Humidity</p>
                         </div>
+                        <div class="metric">
+                            <i class="fas fa-cloud-rain"></i>
+                            <span id="rain">${rainValue}%</span>
+                            <p>Rain Level (${rainLabel})</p>
+                        </div>
                     </div>
                     <div class="details">
-                        <p><i class="fas fa-microchip"></i> Source: ESP32 + DHT11</p>
+                        <p><i class="fas fa-microchip"></i> Source: ESP32 + DHT11 + Rain Sensor</p>
                         <p><i class="fas fa-broadcast-tower"></i> Transport: MQTT (HiveMQ Cloud)</p>
                         <p><i class="fas fa-clock"></i> Last update: ${new Date().toLocaleTimeString()}</p>
                     </div>
@@ -352,27 +380,35 @@
             recentReadings.slice(-10).forEach(r => {
                 const temp = isCelsius ? r.temp : (r.temp * 9/5 + 32);
                 const unit = isCelsius ? '°C' : '°F';
+                const rainLabel = getRainLabel(r.rain);
+                const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
+
                 forecastContainer.innerHTML += `
                     <div class="forecast-day">
                         <p>${r.time}</p>
                         <i class="fas fa-thermometer-half"></i>
                         <p>${Math.round(temp)}${unit}</p>
-                        <p>${Math.round(r.hum)}%</p>
+                        <p><i class="fas fa-tint"></i> ${Math.round(r.hum)}%</p>
+                        <p><i class="fas fa-cloud-rain"></i> ${rainValue}% (${rainLabel})</p>
                     </div>
                 `;
             });
         }
 
-        function updateChartWithReading(hum) {
+        function updateChartWithReading(hum, rain) {
             if (!humidityChart) return;
             const timeLabel = new Date().toLocaleTimeString();
             humidityChart.data.labels.push(timeLabel);
             humidityChart.data.datasets[0].data.push(hum);
+            humidityChart.data.datasets[1].data.push(
+                typeof rain === 'number' ? rain : null
+            );
 
             // keep only last 20 points
             if (humidityChart.data.labels.length > 20) {
                 humidityChart.data.labels.shift();
                 humidityChart.data.datasets[0].data.shift();
+                humidityChart.data.datasets[1].data.shift();
             }
 
             humidityChart.update('none');
@@ -412,19 +448,22 @@
             client.on('message', (topic, message) => {
                 try {
                     const payload = JSON.parse(message.toString());
-                    if (typeof payload.temp === 'number' && typeof payload.hum === 'number') {
-                        currentData.temp = payload.temp;
-                        currentData.hum = payload.hum;
+                    // Accept temp, hum, and optional rain
+                    if (typeof payload.temp === 'number') currentData.temp = payload.temp;
+                    if (typeof payload.hum === 'number') currentData.hum = payload.hum;
+                    if (typeof payload.rain === 'number') currentData.rain = payload.rain;
 
+                    if (currentData.temp != null && currentData.hum != null) {
                         recentReadings.push({
                             time: new Date().toLocaleTimeString(),
-                            temp: payload.temp,
-                            hum: payload.hum
+                            temp: currentData.temp,
+                            hum: currentData.hum,
+                            rain: currentData.rain
                         });
 
                         updateCurrentWeatherCard();
                         renderRecentReadings();
-                        updateChartWithReading(payload.hum);
+                        updateChartWithReading(currentData.hum, currentData.rain);
                     }
                 } catch (e) {
                     console.error('Invalid JSON payload:', message.toString(), e);
