@@ -252,18 +252,49 @@
             background: #ef4444;
         }
 
-        .details {
+        /* Light badge */
+        .light-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 3px 10px;
+            font-size: 0.75rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.7);
+            color: #e5e7eb;
+        }
+
+        .light-usage {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            opacity: 0.9;
+            text-align: left;
+        }
+
+        .side-panel {
             flex: 1;
-            min-width: 220px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            min-width: 260px;
+            display: flex;
+            flex-direction: column;
             gap: 10px;
+        }
+
+        .details {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.4);
         }
         .details p {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 10px;
-            font-size: 0.95em;
+            font-size: 0.9em;
             color: #e5e7eb;
             opacity: 0.95;
         }
@@ -271,6 +302,37 @@
             width: 18px;
             text-align: center;
             color: #38bdf8;
+            margin-top: 2px;
+        }
+
+        .env-summary {
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.45);
+        }
+        .env-summary h3 {
+            font-size: 0.95rem;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        .env-summary p {
+            font-size: 0.85rem;
+            margin-bottom: 6px;
+            opacity: 0.95;
+        }
+        .summary-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 4px;
+        }
+        .summary-tag {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(55, 65, 81, 0.9);
+            border: 1px solid rgba(156, 163, 175, 0.9);
         }
 
         .unit-toggle {
@@ -303,15 +365,14 @@
             padding-bottom: 4px;
         }
 
-        /* HOURLY-STYLE CARDS (like your screenshot) */
+        /* HOURLY-STYLE CARDS */
         .forecast-day {
             background: #f9fafb;
             color: #111827;
             padding: 10px 10px;
             border-radius: 12px;
             text-align: center;
-            min-width: 80px;
-            max-width: 90px;
+            min-width: 90px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -338,7 +399,7 @@
             color: #6b7280;
         }
         .hour-temp {
-            font-size: 1.3rem;
+            font-size: 1.2rem;
             font-weight: 600;
             margin: 2px 0;
             color: #111827;
@@ -358,6 +419,17 @@
             font-size: 0.65rem;
             color: #9ca3af;
             margin-top: 2px;
+        }
+
+        /* Light line in forecast */
+        .hour-light {
+            font-size: 0.7rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+        .hour-light i {
+            font-size: 0.7rem;
+            margin-right: 3px;
         }
 
         /* Chart */
@@ -417,9 +489,6 @@
             .weather-card {
                 flex-direction: column;
             }
-            .details {
-                grid-template-columns: 1fr;
-            }
         }
     </style>
 </head>
@@ -466,14 +535,16 @@
         </section>
 
         <section id="chart-section">
-            <h2><i class="fas fa-chart-line"></i> Humidity & Rain Trend</h2>
+            <h2><i class="fas fa-chart-line"></i> Humidity, Rain & Light Trend</h2>
             <canvas id="humidity-chart"></canvas>
-            <p class="chart-note">Showing the last 20 updates received from the ESP32 via MQTT.</p>
+            <p class="chart-note">
+                Showing the last 20 updates from the ESP32: humidity, rain level, and how bright the area is (light level).
+            </p>
         </section>
     </main>
 
     <footer>
-        <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor | <a href="#" target="_blank">View Source</a></p>
+        <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor + Light Sensor | <a href="#" target="_blank">View Source</a></p>
     </footer>
 
     <script>
@@ -488,8 +559,8 @@
 
         let humidityChart;
         let isCelsius = true; // assume ESP sends °C
-        let currentData = { temp: null, hum: null, rain: null };
-        let recentReadings = []; // { time, temp, hum, rain }
+        let currentData = { temp: null, hum: null, rain: null, lightRaw: null }; // lightRaw comes from BH1750
+        let recentReadings = []; // { time, temp, hum, rain, lightRaw }
         let lastRecentTimestamp = 0; // for 5-minute readings
 
         // ---------- Chart init ----------
@@ -518,6 +589,16 @@
                             tension: 0.4,
                             pointRadius: 3,
                             pointHoverRadius: 5
+                        },
+                        {
+                            label: 'Light Level (%)',
+                            data: [],
+                            borderColor: '#fbbf24',
+                            backgroundColor: 'rgba(251, 191, 36, 0.18)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
                         }
                     ]
                 },
@@ -539,7 +620,7 @@
                             max: 100,
                             title: { 
                                 display: true, 
-                                text: 'Percentage (%)',
+                                text: 'Percentage / Level',
                                 color: '#e5e7eb',
                                 font: { size: 12 }
                             },
@@ -569,28 +650,30 @@
         }
 
         // ---------- Day condition helpers ----------
-        function getDayCondition(temp, hum, rain) {
+        function getDayCondition(temp, hum, rain, lightRaw) {
             if (rain != null && rain >= 50) {
                 return { label: 'Rainy', icon: 'fas fa-cloud-showers-heavy', className: 'rainy' };
             }
-            if ((rain != null && rain >= 10 && rain < 50) || (hum != null && hum >= 70)) {
+            if ((rain != null && rain >= 10 && rain < 50) ||
+                (hum != null && hum >= 70) ||
+                (lightRaw != null && lightRaw < 200)) {
                 return { label: 'Cloudy', icon: 'fas fa-cloud', className: 'cloudy' };
             }
             return { label: 'Sunny', icon: 'fas fa-sun', className: 'sunny' };
         }
 
         function updateDayStatus() {
-            const { temp, hum, rain } = currentData;
+            const { temp, hum, rain, lightRaw } = currentData;
             if (temp == null || hum == null) {
                 dayStatusEl.className = 'day-status';
                 dayStatusEl.innerHTML = '<i class="fas fa-question-circle"></i><span>Waiting for data...</span>';
                 return;
             }
-            const condition = getDayCondition(temp, hum, rain);
+            const condition = getDayCondition(temp, hum, rain, lightRaw);
             dayStatusEl.className = 'day-status ' + condition.className;
             dayStatusEl.innerHTML = `
                 <i class="${condition.icon}"></i>
-                <span>Today: ${condition.label}</span>
+                <span>Today looks: ${condition.label}</span>
             `;
         }
 
@@ -598,8 +681,8 @@
         function getRainLabel(percent) {
             if (percent == null || isNaN(percent)) return 'N/A';
             if (percent < 10) return 'Dry';
-            if (percent < 50) return 'Light';
-            return 'Heavy';
+            if (percent < 50) return 'Light rain';
+            return 'Heavy rain';
         }
 
         function getRainBadgeClass(percent) {
@@ -607,6 +690,68 @@
             if (percent < 10) return 'dry';
             if (percent < 50) return 'light';
             return 'heavy';
+        }
+
+        // ---------- Light helpers (user-friendly) ----------
+        function getLightLabel(lightRaw) {
+            if (lightRaw == null || isNaN(lightRaw)) return 'Light level unknown';
+            if (lightRaw < 50) return 'Very dark environment';
+            if (lightRaw < 300) return 'Dim, soft lighting';
+            if (lightRaw < 1000) return 'Comfortably bright area';
+            return 'Very bright, like strong daylight';
+        }
+
+        function getLightShortLabel(lightRaw) {
+            if (lightRaw == null || isNaN(lightRaw)) return '--';
+            if (lightRaw < 50) return 'Very Dark';
+            if (lightRaw < 300) return 'Dim';
+            if (lightRaw < 1000) return 'Bright';
+            return 'Very Bright';
+        }
+
+        function getLightUsageText(lightRaw) {
+            if (lightRaw == null || isNaN(lightRaw)) {
+                return 'This shows how bright the place is. Brighter means more light for reading, working, or plants.';
+            }
+            if (lightRaw < 50) {
+                return 'Too dark for reading or working. Room lights are recommended.';
+            }
+            if (lightRaw < 300) {
+                return 'Okay for relaxing, but a bit dim for studying or detailed work.';
+            }
+            if (lightRaw < 1000) {
+                return 'Good lighting for studying, working, or indoor activities.';
+            }
+            return 'Very bright — similar to strong daylight near windows or outdoors.';
+        }
+
+        function mapLightToPercent(lightRaw) {
+            if (lightRaw == null || isNaN(lightRaw)) return null;
+            const maxLight = 1500; // simple cap for graph scaling
+            let percent = (lightRaw / maxLight) * 100;
+            if (percent < 0) percent = 0;
+            if (percent > 100) percent = 100;
+            return Math.round(percent);
+        }
+
+        // ---------- Comfort summary helpers ----------
+        function getComfortSummary(temp, hum) {
+            if (temp == null || hum == null) return 'Waiting for enough data to describe how the room feels.';
+            if (temp < 22) return 'Feels cool. A bit chilly for some people.';
+            if (temp >= 22 && temp <= 28 && hum < 70) return 'Feels comfortable for most people.';
+            if (temp > 28 && hum >= 70) return 'Feels warm and humid. It may feel sticky or heavy.';
+            if (temp > 30) return 'Feels hot. A fan or aircon might be needed.';
+            return 'Conditions are within a normal range.';
+        }
+
+        function getSuggestedUse(lightRaw, hum, rain) {
+            if (rain != null && rain >= 50) return 'Better for indoor activities — heavy rain outside.';
+            if (lightRaw != null && lightRaw < 100) return 'Good time for resting or screen work, but lighting is low.';
+            if (lightRaw != null && lightRaw >= 300 && (rain == null || rain < 10)) {
+                return 'Good for outdoor activities or drying clothes, with enough natural light.';
+            }
+            if (hum != null && hum > 75) return 'May feel a bit sticky — light indoor activities are better.';
+            return 'Suitable for normal indoor activities like studying or working.';
         }
 
         // ---------- UI helpers ----------
@@ -620,6 +765,13 @@
             const rainValue = currentData.rain != null ? Math.round(currentData.rain) : 'N/A';
             const rainLabel = getRainLabel(currentData.rain);
             const rainBadgeClass = getRainBadgeClass(currentData.rain);
+
+            const brightnessLabel = getLightLabel(currentData.lightRaw);
+            const brightnessShort = getLightShortLabel(currentData.lightRaw);
+            const lightUsage = getLightUsageText(currentData.lightRaw);
+
+            const comfortSummary = getComfortSummary(currentData.temp, currentData.hum);
+            const suggestedUse = getSuggestedUse(currentData.lightRaw, currentData.hum, currentData.rain);
 
             weatherContent.innerHTML = `
                 <div class="weather-card">
@@ -643,11 +795,45 @@
                                 <span>${rainLabel}</span>
                             </div>
                         </div>
+                        <div class="metric">
+                            <i class="fas fa-sun metric-icon"></i>
+                            <div class="metric-value" id="light">${brightnessShort}</div>
+                            <div class="metric-label">Light Level</div>
+                            <div class="light-badge">
+                                <span>${brightnessLabel}</span>
+                            </div>
+                            <div class="light-usage">
+                                ${lightUsage}
+                            </div>
+                        </div>
                     </div>
-                    <div class="details">
-                        <p><i class="fas fa-microchip"></i> <span>Source: ESP32 + DHT11 + Rain Sensor</span></p>
-                        <p><i class="fas fa-broadcast-tower"></i> <span>Transport: MQTT (HiveMQ Cloud)</span></p>
-                        <p><i class="fas fa-clock"></i> <span>Last update: ${new Date().toLocaleTimeString()}</span></p>
+
+                    <div class="side-panel">
+                        <div class="details">
+                            <p>
+                                <i class="fas fa-microchip"></i>
+                                <span>Source: ESP32 with DHT11 (temperature & humidity), rain sensor, and a light sensor that measures how bright the area is.</span>
+                            </p>
+                            <p>
+                                <i class="fas fa-lightbulb"></i>
+                                <span>The light sensor helps you see if the current brightness is enough for reading, working, or taking care of plants.</span>
+                            </p>
+                            <p>
+                                <i class="fas fa-clock"></i>
+                                <span>Last update: ${new Date().toLocaleTimeString()}</span>
+                            </p>
+                        </div>
+
+                        <div class="env-summary">
+                            <h3>Environment Summary</h3>
+                            <p>${comfortSummary}</p>
+                            <p>${suggestedUse}</p>
+                            <div class="summary-tags">
+                                <span class="summary-tag">Temp: ${tempRounded}${unit}</span>
+                                <span class="summary-tag">Humidity: ${Math.round(currentData.hum)}%</span>
+                                <span class="summary-tag">Light: ${brightnessShort}</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="unit-toggle">
@@ -688,8 +874,9 @@
                 const hum = Math.round(r.hum);
                 const rainLabel = getRainLabel(r.rain);
                 const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
+                const lightLabel = getLightLabel(r.lightRaw);
 
-                const cond = getDayCondition(r.temp, r.hum, r.rain);
+                const cond = getDayCondition(r.temp, r.hum, r.rain, r.lightRaw);
 
                 forecastContainer.innerHTML += `
                     <div class="forecast-day">
@@ -702,13 +889,17 @@
                             <i class="fas fa-tint"></i>
                             <span>${hum}%</span>
                         </div>
+                        <div class="hour-light">
+                            <i class="fas fa-sun"></i>
+                            <span>${lightLabel}</span>
+                        </div>
                         <div class="hour-rain">${rainValue}% • ${rainLabel}</div>
                     </div>
                 `;
             });
         }
 
-        function updateChartWithReading(hum, rain) {
+        function updateChartWithReading(hum, rain, lightRaw) {
             if (!humidityChart) return;
             const timeLabel = new Date().toLocaleTimeString();
             humidityChart.data.labels.push(timeLabel);
@@ -717,10 +908,14 @@
                 typeof rain === 'number' ? rain : null
             );
 
+            const lightPercent = mapLightToPercent(lightRaw);
+            humidityChart.data.datasets[2].data.push(
+                typeof lightPercent === 'number' ? lightPercent : null
+            );
+
             if (humidityChart.data.labels.length > 20) {
                 humidityChart.data.labels.shift();
-                humidityChart.data.datasets[0].data.shift();
-                humidityChart.data.datasets[1].data.shift();
+                humidityChart.data.datasets.forEach(ds => ds.data.shift());
             }
 
             humidityChart.update('none');
@@ -786,6 +981,8 @@
                     if (typeof payload.temp === 'number') currentData.temp = payload.temp;
                     if (typeof payload.hum === 'number') currentData.hum = payload.hum;
                     if (typeof payload.rain === 'number') currentData.rain = payload.rain;
+                    // from BH1750, e.g. payload.light or payload.lux, adjust this line to match your JSON
+                    if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
 
                     if (currentData.temp != null && currentData.hum != null) {
                         const now = Date.now();
@@ -795,14 +992,15 @@
                                 time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
                                 temp: currentData.temp,
                                 hum: currentData.hum,
-                                rain: currentData.rain
+                                rain: currentData.rain,
+                                lightRaw: currentData.lightRaw
                             });
                             renderRecentReadings();
                         }
 
                         updateCurrentWeatherCard();
                         updateDayStatus();
-                        updateChartWithReading(currentData.hum, currentData.rain);
+                        updateChartWithReading(currentData.hum, currentData.rain, currentData.lightRaw);
                     }
                 } catch (e) {
                     console.error('Invalid JSON payload:', message.toString(), e);
