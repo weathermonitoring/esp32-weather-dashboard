@@ -365,7 +365,6 @@
             padding-bottom: 4px;
         }
 
-        /* HOURLY-STYLE CARDS */
         .forecast-day {
             background: #f9fafb;
             color: #111827;
@@ -421,7 +420,6 @@
             margin-top: 2px;
         }
 
-        /* Light line in forecast */
         .hour-light {
             font-size: 0.7rem;
             color: #6b7280;
@@ -430,6 +428,19 @@
         .hour-light i {
             font-size: 0.7rem;
             margin-right: 3px;
+        }
+
+        /* NEW: wind row in forecast cards */
+        .hour-wind {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+        .hour-wind i {
+            font-size: 0.7rem;
         }
 
         /* Chart */
@@ -544,7 +555,7 @@
     </main>
 
     <footer>
-        <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor + Light Sensor | <a href="#" target="_blank">View Source</a></p>
+        <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor + Light Sensor + Wind Vane | <a href="#" target="_blank">View Source</a></p>
     </footer>
 
     <script>
@@ -559,8 +570,10 @@
 
         let humidityChart;
         let isCelsius = true; // assume ESP sends °C
-        let currentData = { temp: null, hum: null, rain: null, lightRaw: null }; // lightRaw comes from BH1750
-        let recentReadings = []; // { time, temp, hum, rain, lightRaw }
+
+        // NEW: add windDir
+        let currentData = { temp: null, hum: null, rain: null, lightRaw: null, windDir: null };
+        let recentReadings = []; // { time, temp, hum, rain, lightRaw, windDir }
         let lastRecentTimestamp = 0; // for 5-minute readings
 
         // ---------- Chart init ----------
@@ -727,7 +740,7 @@
 
         function mapLightToPercent(lightRaw) {
             if (lightRaw == null || isNaN(lightRaw)) return null;
-            const maxLight = 1500; // simple cap for graph scaling
+            const maxLight = 1500;
             let percent = (lightRaw / maxLight) * 100;
             if (percent < 0) percent = 0;
             if (percent > 100) percent = 100;
@@ -773,6 +786,8 @@
             const comfortSummary = getComfortSummary(currentData.temp, currentData.hum);
             const suggestedUse = getSuggestedUse(currentData.lightRaw, currentData.hum, currentData.rain);
 
+            const windText = currentData.windDir || '--';
+
             weatherContent.innerHTML = `
                 <div class="weather-card">
                     <div class="temp-humid">
@@ -806,17 +821,22 @@
                                 ${lightUsage}
                             </div>
                         </div>
+                        <div class="metric">
+                            <i class="fas fa-compass metric-icon"></i>
+                            <div class="metric-value" id="wind-direction">${windText}</div>
+                            <div class="metric-label">Wind Direction</div>
+                        </div>
                     </div>
 
                     <div class="side-panel">
                         <div class="details">
                             <p>
                                 <i class="fas fa-microchip"></i>
-                                <span>Source: ESP32 with DHT11 (temperature & humidity), rain sensor, and a light sensor that measures how bright the area is.</span>
+                                <span>Source: ESP32 with DHT11 (temperature & humidity), rain sensor, light sensor, and an 8-direction wind vane using Hall sensors.</span>
                             </p>
                             <p>
-                                <i class="fas fa-lightbulb"></i>
-                                <span>The light sensor helps you see if the current brightness is enough for reading, working, or taking care of plants.</span>
+                                <i class="fas fa-location-arrow"></i>
+                                <span>Wind direction gives an idea of where air is moving (e.g., N, NE, E, SW), which is useful for local weather observation.</span>
                             </p>
                             <p>
                                 <i class="fas fa-clock"></i>
@@ -832,6 +852,7 @@
                                 <span class="summary-tag">Temp: ${tempRounded}${unit}</span>
                                 <span class="summary-tag">Humidity: ${Math.round(currentData.hum)}%</span>
                                 <span class="summary-tag">Light: ${brightnessShort}</span>
+                                <span class="summary-tag">Wind: ${windText}</span>
                             </div>
                         </div>
                     </div>
@@ -863,40 +884,43 @@
                         Waiting for readings...
                     </div>
                 `;
-                return;
+            } else {
+                forecastContainer.innerHTML = '';
+                recentReadings.slice(-10).forEach(r => {
+                    const temp = isCelsius ? r.temp : (r.temp * 9/5 + 32);
+                    const unit = isCelsius ? '°C' : '°F';
+                    const hum = Math.round(r.hum);
+                    const rainLabel = getRainLabel(r.rain);
+                    const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
+                    const lightLabel = getLightLabel(r.lightRaw);
+                    const windText = r.windDir || '--';
+
+                    const cond = getDayCondition(r.temp, r.hum, r.rain, r.lightRaw);
+
+                    forecastContainer.innerHTML += `
+                        <div class="forecast-day">
+                            <div class="forecast-time">${r.time}</div>
+                            <div class="hour-icon">
+                                <i class="${cond.icon}"></i>
+                            </div>
+                            <div class="hour-temp">${Math.round(temp)}${unit}</div>
+                            <div class="hour-hum">
+                                <i class="fas fa-tint"></i>
+                                <span>${hum}%</span>
+                            </div>
+                            <div class="hour-light">
+                                <i class="fas fa-sun"></i>
+                                <span>${lightLabel}</span>
+                            </div>
+                            <div class="hour-wind">
+                                <i class="fas fa-location-arrow"></i>
+                                <span>${windText}</span>
+                            </div>
+                            <div class="hour-rain">${rainValue}% • ${rainLabel}</div>
+                        </div>
+                    `;
+                });
             }
-
-            forecastContainer.innerHTML = '';
-            // last 10 samples (5-min spaced) → ~50 mins window
-            recentReadings.slice(-10).forEach(r => {
-                const temp = isCelsius ? r.temp : (r.temp * 9/5 + 32);
-                const unit = isCelsius ? '°C' : '°F';
-                const hum = Math.round(r.hum);
-                const rainLabel = getRainLabel(r.rain);
-                const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
-                const lightLabel = getLightLabel(r.lightRaw);
-
-                const cond = getDayCondition(r.temp, r.hum, r.rain, r.lightRaw);
-
-                forecastContainer.innerHTML += `
-                    <div class="forecast-day">
-                        <div class="forecast-time">${r.time}</div>
-                        <div class="hour-icon">
-                            <i class="${cond.icon}"></i>
-                        </div>
-                        <div class="hour-temp">${Math.round(temp)}${unit}</div>
-                        <div class="hour-hum">
-                            <i class="fas fa-tint"></i>
-                            <span>${hum}%</span>
-                        </div>
-                        <div class="hour-light">
-                            <i class="fas fa-sun"></i>
-                            <span>${lightLabel}</span>
-                        </div>
-                        <div class="hour-rain">${rainValue}% • ${rainLabel}</div>
-                    </div>
-                `;
-            });
         }
 
         function updateChartWithReading(hum, rain, lightRaw) {
@@ -981,8 +1005,9 @@
                     if (typeof payload.temp === 'number') currentData.temp = payload.temp;
                     if (typeof payload.hum === 'number') currentData.hum = payload.hum;
                     if (typeof payload.rain === 'number') currentData.rain = payload.rain;
-                    // from BH1750, e.g. payload.light or payload.lux, adjust this line to match your JSON
                     if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
+                    // NEW: parse wind direction string from JSON (e.g., "N", "NE", "SW")
+                    if (typeof payload.wind === 'string') currentData.windDir = payload.wind;
 
                     if (currentData.temp != null && currentData.hum != null) {
                         const now = Date.now();
@@ -993,7 +1018,8 @@
                                 temp: currentData.temp,
                                 hum: currentData.hum,
                                 rain: currentData.rain,
-                                lightRaw: currentData.lightRaw
+                                lightRaw: currentData.lightRaw,
+                                windDir: currentData.windDir
                             });
                             renderRecentReadings();
                         }
