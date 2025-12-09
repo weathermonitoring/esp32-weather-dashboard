@@ -760,392 +760,42 @@
     </style>
 </head>
 <body>
-    <header>
-        <div class="header-left">
-            <i class="fas fa-cloud-sun"></i>
-            <h1>Professional Weather Dashboard</h1>
+<header>
+    <div class="header-left">
+        <i class="fas fa-cloud-sun"></i>
+        <h1>Professional Weather Dashboard</h1>
+    </div>
+    <div class="header-right">
+        <div id="mqtt-status" class="disconnected">
+            <span class="dot"></span>
+            <span class="text">MQTT: Disconnected</span>
         </div>
-        <div class="header-right">
-            <div id="mqtt-status" class="disconnected">
-                <span class="dot"></span>
-                <span class="text">MQTT: Disconnected</span>
-            </div>
-            <button id="toggle-mode"><i class="fas fa-moon"></i> Dark Mode</button>
+        <button id="toggle-mode"><i class="fas fa-moon"></i> Dark Mode</button>
+    </div>
+</header>
+
+<main>
+    <section id="current-weather">
+        <h2><i class="fas fa-gauge-high"></i> Current Conditions (ESP32 Sensor)</h2>
+        <!-- Day status (Sunny / Cloudy / Rainy) -->
+        <div id="day-status" class="day-status">
+            <i class="fas fa-question-circle"></i>
+            <span>Waiting for data...</span>
         </div>
-    </header>
 
-    <main>
-        <section id="current-weather">
-            <h2><i class="fas fa-gauge-high"></i> Current Conditions (ESP32 Sensor)</h2>
-            <!-- Day status (Sunny / Cloudy / Rainy) -->
-            <div id="day-status" class="day-status">
-                <i class="fas fa-question-circle"></i>
-                <span>Waiting for data...</span>
+        <div id="weather-content">
+            <div id="weather-loading" class="loading">
+                <div class="spinner"></div>
+                Waiting for sensor data from MQTT...
             </div>
 
-            <div id="weather-content">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Waiting for sensor data from MQTT...
-                </div>
-            </div>
-        </section>
-
-        <section id="forecast">
-            <h2><i class="fas fa-clock-rotate-left"></i> Recent Readings (Every 5 Minutes)</h2>
-            <div id="forecast-container">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Waiting for readings...
-                </div>
-            </div>
-        </section>
-
-        <section id="chart-section">
-            <h2><i class="fas fa-chart-line"></i> Humidity, Rain & Light Trend</h2>
-            <canvas id="humidity-chart"></canvas>
-            <p class="chart-note">
-                Showing the last 20 updates from the ESP32: humidity, rain level, and how bright the area is (light level).
-            </p>
-        </section>
-    </main>
-
-    <footer>
-        <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor + Light Sensor + Wind Vane + Anemometer | <a href="#" target="_blank">View Source</a></p>
-    </footer>
-
-    <script>
-        // ---------- DOM refs ----------
-        const toggleModeBtn = document.getElementById('toggle-mode');
-        const weatherContent = document.getElementById('weather-content');
-        const forecastContainer = document.getElementById('forecast-container');
-        const ctx = document.getElementById('humidity-chart').getContext('2d');
-        const mqttStatusEl = document.getElementById('mqtt-status');
-        const mqttStatusText = mqttStatusEl.querySelector('.text');
-        const dayStatusEl = document.getElementById('day-status');
-
-        let humidityChart;
-        let isCelsius = true; // assume ESP sends °C
-
-        // MQTT client + fan topics
-        let mqttClient = null;
-        const MQTT_HOST = 'wss://1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud:8884/mqtt';
-        const MQTT_USERNAME = 'hivemq.webclient.1764536797209';
-        const MQTT_PASSWORD = '8mN37GwZr,Lc!u>$PJ1e';
-
-        const TOPIC_SENSORS    = 'esp32/sensors';
-        const TOPIC_FAN_CMD    = 'esp32/fan/cmd';
-        const TOPIC_FAN_STATUS = 'esp32/fan/status';
-
-        let fanState = null; // "ON" / "OFF" / null
-
-        // Now track wind speed too
-        let currentData = {
-            temp: null,
-            hum: null,
-            rain: null,
-            lightRaw: null,
-            windDir: null,
-            windSpeed: null
-        };
-        let recentReadings = []; // { time, temp, hum, rain, lightRaw, windDir, windSpeed }
-        let lastRecentTimestamp = 0; // for 5-minute readings
-
-        // ---------- Chart init ----------
-        function initChart() {
-            humidityChart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [
-                        {
-                            label: 'Humidity (%)',
-                            data: [],
-                            borderColor: '#4ade80',
-                            backgroundColor: 'rgba(74, 222, 128, 0.2)',
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 3,
-                            pointHoverRadius: 5
-                        },
-                        {
-                            label: 'Rain (%)',
-                            data: [],
-                            borderColor: '#38bdf8',
-                            backgroundColor: 'rgba(56, 189, 248, 0.18)',
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 3,
-                            pointHoverRadius: 5
-                        },
-                        {
-                            label: 'Light Level (%)',
-                            data: [],
-                            borderColor: '#fbbf24',
-                            backgroundColor: 'rgba(251, 191, 36, 0.18)',
-                            fill: true,
-                            tension: 0.4,
-                            pointRadius: 3,
-                            pointHoverRadius: 5
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: {
-                            display: true,
-                            labels: {
-                                color: '#f9fafb',
-                                font: { size: 12 }
-                            }
-                        }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            max: 100,
-                            title: {
-                                display: true,
-                                text: 'Percentage / Level',
-                                color: '#e5e7eb',
-                                font: { size: 12 }
-                            },
-                            ticks: {
-                                color: '#e5e7eb',
-                                stepSize: 10
-                            },
-                            grid: { color: 'rgba(148, 163, 184, 0.35)' }
-                        },
-                        x: {
-                            title: {
-                                display: true,
-                                text: 'Time',
-                                color: '#e5e7eb',
-                                font: { size: 12 }
-                            },
-                            ticks: {
-                                color: '#e5e7eb',
-                                maxRotation: 45,
-                                minRotation: 0
-                            },
-                            grid: { color: 'rgba(148, 163, 184, 0.25)' }
-                        }
-                    }
-                }
-            });
-        }
-
-        // ---------- Helper: animate value pop ----------
-        function animateValue(id) {
-            const el = document.getElementById(id);
-            if (!el) return;
-            el.classList.remove('bump');
-            // force reflow
-            void el.offsetWidth;
-            el.classList.add('bump');
-        }
-
-        // ---------- Day condition helpers ----------
-        function getDayCondition(temp, hum, rain, lightRaw) {
-            if (rain != null && rain >= 50) {
-                return { label: 'Rainy', icon: 'fas fa-cloud-showers-heavy', className: 'rainy' };
-            }
-            if ((rain != null && rain >= 10 && rain < 50) ||
-                (hum != null && hum >= 70) ||
-                (lightRaw != null && lightRaw < 200)) {
-                return { label: 'Cloudy', icon: 'fas fa-cloud', className: 'cloudy' };
-            }
-            return { label: 'Sunny', icon: 'fas fa-sun', className: 'sunny' };
-        }
-
-        function updateDayStatus() {
-            const { temp, hum, rain, lightRaw } = currentData;
-            if (temp == null || hum == null) {
-                dayStatusEl.className = 'day-status';
-                dayStatusEl.innerHTML = '<i class="fas fa-question-circle"></i><span>Waiting for data...</span>';
-                return;
-            }
-            const condition = getDayCondition(temp, hum, rain, lightRaw);
-            dayStatusEl.className = 'day-status ' + condition.className;
-            dayStatusEl.innerHTML = `
-                <i class="${condition.icon}"></i>
-                <span>Today looks: ${condition.label}</span>
-            `;
-        }
-
-        // ---------- Rain helpers ----------
-        function getRainLabel(percent) {
-            if (percent == null || isNaN(percent)) return 'N/A';
-            if (percent < 10) return 'Dry';
-            if (percent < 50) return 'Light rain';
-            return 'Heavy rain';
-        }
-
-        function getRainBadgeClass(percent) {
-            if (percent == null || isNaN(percent)) return '';
-            if (percent < 10) return 'dry';
-            if (percent < 50) return 'light';
-            return 'heavy';
-        }
-
-        // ---------- Light helpers (user-friendly) ----------
-        function getLightLabel(lightRaw) {
-            if (lightRaw == null || isNaN(lightRaw)) return 'Light level unknown';
-            if (lightRaw < 50) return 'Very dark environment';
-            if (lightRaw < 300) return 'Dim, soft lighting';
-            if (lightRaw < 1000) return 'Comfortably bright area';
-            return 'Very bright, like strong daylight';
-        }
-
-        function getLightShortLabel(lightRaw) {
-            if (lightRaw == null || isNaN(lightRaw)) return '--';
-            if (lightRaw < 50) return 'Very Dark';
-            if (lightRaw < 300) return 'Dim';
-            if (lightRaw < 1000) return 'Bright';
-            return 'Very Bright';
-        }
-
-        function getLightUsageText(lightRaw) {
-            if (lightRaw == null || isNaN(lightRaw)) {
-                return 'This shows how bright the place is. Brighter means more light for reading, working, or plants.';
-            }
-            if (lightRaw < 50) {
-                return 'Too dark for reading or working. Room lights are recommended.';
-            }
-            if (lightRaw < 300) {
-                return 'Okay for relaxing, but a bit dim for studying or detailed work.';
-            }
-            if (lightRaw < 1000) {
-                return 'Good lighting for studying, working, or indoor activities.';
-            }
-            return 'Very bright — similar to strong daylight near windows or outdoors.';
-        }
-
-        function mapLightToPercent(lightRaw) {
-            if (lightRaw == null || isNaN(lightRaw)) return null;
-            const maxLight = 1500;
-            let percent = (lightRaw / maxLight) * 100;
-            if (percent < 0) percent = 0;
-            if (percent > 100) percent = 100;
-            return Math.round(percent);
-        }
-
-        // ---------- Comfort summary helpers ----------
-        function getComfortSummary(temp, hum) {
-            if (temp == null || hum == null) return 'Waiting for enough data to describe how the room feels.';
-            if (temp < 22) return 'Feels cool. A bit chilly for some people.';
-            if (temp >= 22 && temp <= 28 && hum < 70) return 'Feels comfortable for most people.';
-            if (temp > 28 && hum >= 70) return 'Feels warm and humid. It may feel sticky or heavy.';
-            if (temp > 30) return 'Feels hot. A fan or aircon might be needed.';
-            return 'Conditions are within a normal range.';
-        }
-
-        function getSuggestedUse(lightRaw, hum, rain) {
-            if (rain != null && rain >= 50) return 'Better for indoor activities — heavy rain outside.';
-            if (lightRaw != null && lightRaw < 100) return 'Good time for resting or screen work, but lighting is low.';
-            if (lightRaw != null && lightRaw >= 300 && (rain == null || rain < 10)) {
-                return 'Good for outdoor activities or drying clothes, with enough natural light.';
-            }
-            if (hum != null && hum > 75) return 'May feel a bit sticky — light indoor activities are better.';
-            return 'Suitable for normal indoor activities like studying or working.';
-        }
-
-        // ---------- Wind helpers ----------
-        function getWindAngle(dir) {
-            switch (dir) {
-                case 'N':  return 0;
-                case 'NE': return 45;
-                case 'E':  return 90;
-                case 'SE': return 135;
-                case 'S':  return 180;
-                case 'SW': return 225;
-                case 'W':  return 270;
-                case 'NW': return 315;
-                default: return 0;
-            }
-        }
-
-        // ---------- FAN UI HELPERS ----------
-        function updateFanUIFromState() {
-            const badge = document.getElementById('fan-status-badge');
-            const label = document.getElementById('fan-state-label');
-            const toggle = document.getElementById('fan-toggle-input');
-
-            if (!badge || !label || !toggle) return;
-
-            if (!fanState) {
-                badge.textContent = 'Unknown';
-                badge.className = 'fan-badge fan-unknown';
-                label.textContent = '--';
-                label.className = 'fan-state-label';
-                toggle.checked = false;
-                return;
-            }
-
-            const isOn = fanState === 'ON';
-            badge.textContent = isOn ? 'ON' : 'OFF';
-            badge.className = 'fan-badge ' + (isOn ? 'fan-on' : 'fan-off');
-            label.textContent = isOn ? 'ON' : 'OFF';
-            label.className = 'fan-state-label ' + (isOn ? 'on' : 'off');
-            toggle.checked = isOn;
-        }
-
-        function attachFanEvents() {
-            const toggle = document.getElementById('fan-toggle-input');
-            if (!toggle) return;
-
-            toggle.addEventListener('change', () => {
-                if (!mqttClient || !mqttClient.connected) {
-                    // revert toggle if not connected
-                    toggle.checked = fanState === 'ON';
-                    return;
-                }
-                const wantOn = toggle.checked;
-                const msg = wantOn ? 'ON' : 'OFF';
-                mqttClient.publish(TOPIC_FAN_CMD, msg, { qos: 1, retain: true });
-                // optimistic update; will also be updated when status topic is received
-                fanState = msg;
-                updateFanUIFromState();
-            });
-
-            // apply latest state to the newly rendered UI
-            updateFanUIFromState();
-        }
-
-        // ---------- UI helpers ----------
-        function updateCurrentWeatherCard() {
-            if (currentData.temp === null || currentData.hum === null) return;
-
-            const temp = isCelsius ? currentData.temp : (currentData.temp * 9/5 + 32);
-            const tempRounded = Math.round(temp);
-            const unit = isCelsius ? '°C' : '°F';
-
-            const rainValue = currentData.rain != null ? Math.round(currentData.rain) : 'N/A';
-            const rainLabel = getRainLabel(currentData.rain);
-            const rainBadgeClass = getRainBadgeClass(currentData.rain);
-
-            const brightnessLabel = getLightLabel(currentData.lightRaw);
-            const brightnessShort = getLightShortLabel(currentData.lightRaw);
-            const lightUsage = getLightUsageText(currentData.lightRaw);
-
-            const comfortSummary = getComfortSummary(currentData.temp, currentData.hum);
-            const suggestedUse = getSuggestedUse(currentData.lightRaw, currentData.hum, currentData.rain);
-
-            const windText = currentData.windDir || '--';
-            const windSpeedDisplay =
-                typeof currentData.windSpeed === 'number'
-                    ? currentData.windSpeed.toFixed(2) + ' m/s'
-                    : '-- m/s';
-            const windAngle = getWindAngle(windText);
-
-            weatherContent.innerHTML = `
+            <!-- Main weather layout (hidden until first data) -->
+            <div id="weather-main" style="display:none;">
                 <div class="weather-card">
                     <div class="temp-humid">
                         <div class="metric">
                             <i class="fas fa-thermometer-half metric-icon"></i>
-                            <div class="metric-value" id="temperature">${tempRounded}${unit}</div>
+                            <div class="metric-value" id="temperature">--°C</div>
                             <div class="metric-label">Temperature</div>
                             <div class="metric-bar-container">
                                 <div class="metric-bar" id="temp-bar"></div>
@@ -1153,7 +803,7 @@
                         </div>
                         <div class="metric">
                             <i class="fas fa-tint metric-icon"></i>
-                            <div class="metric-value" id="humidity">${Math.round(currentData.hum)}%</div>
+                            <div class="metric-value" id="humidity">--%</div>
                             <div class="metric-label">Humidity</div>
                             <div class="metric-bar-container">
                                 <div class="metric-bar" id="hum-bar"></div>
@@ -1161,28 +811,28 @@
                         </div>
                         <div class="metric">
                             <i class="fas fa-cloud-rain metric-icon"></i>
-                            <div class="metric-value" id="rain">${rainValue}%</div>
+                            <div class="metric-value" id="rain">--%</div>
                             <div class="metric-label">Rain Level</div>
                             <div class="metric-bar-container">
                                 <div class="metric-bar" id="rain-bar"></div>
                             </div>
-                            <div class="rain-badge ${rainBadgeClass}">
+                            <div class="rain-badge" id="rain-badge">
                                 <span class="dot"></span>
-                                <span>${rainLabel}</span>
+                                <span id="rain-badge-text">N/A</span>
                             </div>
                         </div>
                         <div class="metric">
                             <i class="fas fa-sun metric-icon"></i>
-                            <div class="metric-value" id="light">${brightnessShort}</div>
+                            <div class="metric-value" id="light">--</div>
                             <div class="metric-label">Light Level</div>
                             <div class="metric-bar-container">
                                 <div class="metric-bar" id="light-bar"></div>
                             </div>
                             <div class="light-badge">
-                                <span>${brightnessLabel}</span>
+                                <span id="light-label-text">Light level unknown</span>
                             </div>
-                            <div class="light-usage">
-                                ${lightUsage}
+                            <div class="light-usage" id="light-usage-text">
+                                This shows how bright the place is.
                             </div>
                         </div>
                     </div>
@@ -1202,23 +852,23 @@
                                         <span class="compass-label e">E</span>
                                         <span class="compass-label s">S</span>
                                         <span class="compass-label w">W</span>
-                                        <div class="compass-needle" id="compass-needle" style="transform: rotate(${windAngle}deg);"></div>
+                                        <div class="compass-needle" id="compass-needle"></div>
                                         <div class="compass-center-dot"></div>
                                     </div>
                                 </div>
                                 <div class="wind-stats">
                                     <div class="wind-stat-row">
                                         <span class="wind-stat-label">Speed</span>
-                                        <span class="wind-stat-value wind-speed-value" id="wind-speed-value">${windSpeedDisplay}</span>
+                                        <span class="wind-stat-value wind-speed-value" id="wind-speed-value">-- m/s</span>
                                     </div>
                                     <div class="wind-stat-row">
                                         <span class="wind-stat-label">Direction</span>
-                                        <span class="wind-stat-value">${windText}</span>
+                                        <span class="wind-stat-value" id="wind-direction-value">--</span>
                                     </div>
                                     <div class="wind-stat-row">
                                         <span class="wind-stat-label">Note</span>
-                                        <span class="wind-stat-value">
-                                            ${windText !== '--' ? 'Arrow points to where the wind is blowing towards.' : 'Waiting for wind data.'}
+                                        <span class="wind-stat-value" id="wind-note">
+                                            Waiting for wind data.
                                         </span>
                                     </div>
                                 </div>
@@ -1236,19 +886,19 @@
                             </p>
                             <p>
                                 <i class="fas fa-clock"></i>
-                                <span>Last update: ${new Date().toLocaleTimeString()}</span>
+                                <span id="last-update-text">Last update: --:--:--</span>
                             </p>
                         </div>
 
                         <div class="env-summary">
                             <h3>Environment Summary</h3>
-                            <p>${comfortSummary}</p>
-                            <p>${suggestedUse}</p>
+                            <p id="comfort-summary-text">Waiting for enough data to describe how the room feels.</p>
+                            <p id="suggested-use-text">Waiting for sensor readings.</p>
                             <div class="summary-tags">
-                                <span class="summary-tag">Temp: ${tempRounded}${unit}</span>
-                                <span class="summary-tag">Humidity: ${Math.round(currentData.hum)}%</span>
-                                <span class="summary-tag">Light: ${brightnessShort}</span>
-                                <span class="summary-tag">Wind: ${windSpeedDisplay}</span>
+                                <span class="summary-tag" id="tag-temp">Temp: --°C</span>
+                                <span class="summary-tag" id="tag-hum">Humidity: --%</span>
+                                <span class="summary-tag" id="tag-light">Light: --</span>
+                                <span class="summary-tag" id="tag-wind">Wind: -- m/s</span>
                             </div>
                         </div>
 
@@ -1278,248 +928,682 @@
                     </div>
                 </div>
                 <div class="unit-toggle">
-                    <button id="celsius-btn" class="${isCelsius ? 'active' : ''}">°C</button>
-                    <button id="fahrenheit-btn" class="${!isCelsius ? 'active' : ''}">°F</button>
+                    <button id="celsius-btn" class="active">°C</button>
+                    <button id="fahrenheit-btn">°F</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="forecast">
+        <h2><i class="fas fa-clock-rotate-left"></i> Recent Readings (Every 5 Minutes)</h2>
+        <div id="forecast-container">
+            <div class="loading">
+                <div class="spinner"></div>
+                Waiting for readings...
+            </div>
+        </div>
+    </section>
+
+    <section id="chart-section">
+        <h2><i class="fas fa-chart-line"></i> Humidity, Rain & Light Trend</h2>
+        <canvas id="humidity-chart"></canvas>
+        <p class="chart-note">
+            Showing the last 20 updates from the ESP32: humidity, rain level, and how bright the area is (light level).
+        </p>
+    </section>
+</main>
+
+<footer>
+    <p>Data from ESP32 via HiveMQ Cloud. | DHT11 + Rain Sensor + Light Sensor + Wind Vane + Anemometer | <a href="#" target="_blank">View Source</a></p>
+</footer>
+
+<script>
+    // ---------- DOM refs ----------
+    const toggleModeBtn = document.getElementById('toggle-mode');
+    const weatherContent = document.getElementById('weather-content');
+    const weatherLoading = document.getElementById('weather-loading');
+    const weatherMain = document.getElementById('weather-main');
+
+    const forecastContainer = document.getElementById('forecast-container');
+    const ctx = document.getElementById('humidity-chart').getContext('2d');
+    const mqttStatusEl = document.getElementById('mqtt-status');
+    const mqttStatusText = mqttStatusEl.querySelector('.text');
+    const dayStatusEl = document.getElementById('day-status');
+
+    const tempEl = document.getElementById('temperature');
+    const humEl = document.getElementById('humidity');
+    const rainEl = document.getElementById('rain');
+    const lightEl = document.getElementById('light');
+
+    const tempBarEl = document.getElementById('temp-bar');
+    const humBarEl = document.getElementById('hum-bar');
+    const rainBarEl = document.getElementById('rain-bar');
+    const lightBarEl = document.getElementById('light-bar');
+
+    const rainBadge = document.getElementById('rain-badge');
+    const rainBadgeText = document.getElementById('rain-badge-text');
+    const lightLabelText = document.getElementById('light-label-text');
+    const lightUsageText = document.getElementById('light-usage-text');
+
+    const compassNeedleEl = document.getElementById('compass-needle');
+    const windSpeedEl = document.getElementById('wind-speed-value');
+    const windDirEl = document.getElementById('wind-direction-value');
+    const windNoteEl = document.getElementById('wind-note');
+
+    const lastUpdateText = document.getElementById('last-update-text');
+    const comfortSummaryText = document.getElementById('comfort-summary-text');
+    const suggestedUseText = document.getElementById('suggested-use-text');
+    const tagTemp = document.getElementById('tag-temp');
+    const tagHum = document.getElementById('tag-hum');
+    const tagLight = document.getElementById('tag-light');
+    const tagWind = document.getElementById('tag-wind');
+
+    const celsiusBtn = document.getElementById('celsius-btn');
+    const fahrenheitBtn = document.getElementById('fahrenheit-btn');
+
+    // Fan DOM
+    const fanBadge = document.getElementById('fan-status-badge');
+    const fanStateLabel = document.getElementById('fan-state-label');
+    const fanToggleInput = document.getElementById('fan-toggle-input');
+
+    let humidityChart;
+    let isCelsius = true; // assume ESP sends °C
+
+    // MQTT client + fan topics
+    let mqttClient = null;
+    const MQTT_HOST = 'wss://1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud:8884/mqtt';
+    const MQTT_USERNAME = 'hivemq.webclient.1764536797209';
+    const MQTT_PASSWORD = '8mN37GwZr,Lc!u>$PJ1e';
+
+    const TOPIC_SENSORS    = 'esp32/sensors';
+    const TOPIC_FAN_CMD    = 'esp32/fan/cmd';
+    const TOPIC_FAN_STATUS = 'esp32/fan/status';
+
+    let fanState = null; // "ON" / "OFF" / null
+
+    // Now track wind speed too
+    let currentData = {
+        temp: null,
+        hum: null,
+        rain: null,
+        lightRaw: null,
+        windDir: null,
+        windSpeed: null
+    };
+    let recentReadings = []; // { time, temp, hum, rain, lightRaw, windDir, windSpeed }
+    let lastRecentTimestamp = 0; // for 5-minute readings
+
+    // ---------- Chart init ----------
+    function initChart() {
+        humidityChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Humidity (%)',
+                        data: [],
+                        borderColor: '#4ade80',
+                        backgroundColor: 'rgba(74, 222, 128, 0.2)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Rain (%)',
+                        data: [],
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.18)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    },
+                    {
+                        label: 'Light Level (%)',
+                        data: [],
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251, 191, 36, 0.18)',
+                        fill: true,
+                        tension: 0.4,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: true,
+                        labels: {
+                            color: '#f9fafb',
+                            font: { size: 12 }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: {
+                            display: true,
+                            text: 'Percentage / Level',
+                            color: '#e5e7eb',
+                            font: { size: 12 }
+                        },
+                        ticks: {
+                            color: '#e5e7eb',
+                            stepSize: 10
+                        },
+                        grid: { color: 'rgba(148, 163, 184, 0.35)' }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#e5e7eb',
+                            font: { size: 12 }
+                        },
+                        ticks: {
+                            color: '#e5e7eb',
+                            maxRotation: 45,
+                            minRotation: 0
+                        },
+                        grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                    }
+                }
+            }
+        });
+    }
+
+    // ---------- Helper: animate value pop ----------
+    function animateValue(id) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('bump');
+        // force reflow
+        void el.offsetWidth;
+        el.classList.add('bump');
+    }
+
+    // ---------- Day condition helpers ----------
+    function getDayCondition(temp, hum, rain, lightRaw) {
+        if (rain != null && rain >= 50) {
+            return { label: 'Rainy', icon: 'fas fa-cloud-showers-heavy', className: 'rainy' };
+        }
+        if ((rain != null && rain >= 10 && rain < 50) ||
+            (hum != null && hum >= 70) ||
+            (lightRaw != null && lightRaw < 200)) {
+            return { label: 'Cloudy', icon: 'fas fa-cloud', className: 'cloudy' };
+        }
+        return { label: 'Sunny', icon: 'fas fa-sun', className: 'sunny' };
+    }
+
+    function updateDayStatus() {
+        const { temp, hum, rain, lightRaw } = currentData;
+        if (temp == null || hum == null) {
+            dayStatusEl.className = 'day-status';
+            dayStatusEl.innerHTML = '<i class="fas fa-question-circle"></i><span>Waiting for data...</span>';
+            return;
+        }
+        const condition = getDayCondition(temp, hum, rain, lightRaw);
+        dayStatusEl.className = 'day-status ' + condition.className;
+        dayStatusEl.innerHTML = `
+            <i class="${condition.icon}"></i>
+            <span>Today looks: ${condition.label}</span>
+        `;
+    }
+
+    // ---------- Rain helpers ----------
+    function getRainLabel(percent) {
+        if (percent == null || isNaN(percent)) return 'N/A';
+        if (percent < 10) return 'Dry';
+        if (percent < 50) return 'Light rain';
+        return 'Heavy rain';
+    }
+
+    function getRainBadgeClass(percent) {
+        if (percent == null || isNaN(percent)) return '';
+        if (percent < 10) return 'dry';
+        if (percent < 50) return 'light';
+        return 'heavy';
+    }
+
+    // ---------- Light helpers ----------
+    function getLightLabel(lightRaw) {
+        if (lightRaw == null || isNaN(lightRaw)) return 'Light level unknown';
+        if (lightRaw < 50) return 'Very dark environment';
+        if (lightRaw < 300) return 'Dim, soft lighting';
+        if (lightRaw < 1000) return 'Comfortably bright area';
+        return 'Very bright, like strong daylight';
+    }
+
+    function getLightShortLabel(lightRaw) {
+        if (lightRaw == null || isNaN(lightRaw)) return '--';
+        if (lightRaw < 50) return 'Very Dark';
+        if (lightRaw < 300) return 'Dim';
+        if (lightRaw < 1000) return 'Bright';
+        return 'Very Bright';
+    }
+
+    function getLightUsageText(lightRaw) {
+        if (lightRaw == null || isNaN(lightRaw)) {
+            return 'This shows how bright the place is. Brighter means more light for reading, working, or plants.';
+        }
+        if (lightRaw < 50) {
+            return 'Too dark for reading or working. Room lights are recommended.';
+        }
+        if (lightRaw < 300) {
+            return 'Okay for relaxing, but a bit dim for studying or detailed work.';
+        }
+        if (lightRaw < 1000) {
+            return 'Good lighting for studying, working, or indoor activities.';
+        }
+        return 'Very bright — similar to strong daylight near windows or outdoors.';
+    }
+
+    function mapLightToPercent(lightRaw) {
+        if (lightRaw == null || isNaN(lightRaw)) return null;
+        const maxLight = 1500;
+        let percent = (lightRaw / maxLight) * 100;
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        return Math.round(percent);
+    }
+
+    // ---------- Comfort summary helpers ----------
+    function getComfortSummary(temp, hum) {
+        if (temp == null || hum == null) return 'Waiting for enough data to describe how the room feels.';
+        if (temp < 22) return 'Feels cool. A bit chilly for some people.';
+        if (temp >= 22 && temp <= 28 && hum < 70) return 'Feels comfortable for most people.';
+        if (temp > 28 && hum >= 70) return 'Feels warm and humid. It may feel sticky or heavy.';
+        if (temp > 30) return 'Feels hot. A fan or aircon might be needed.';
+        return 'Conditions are within a normal range.';
+    }
+
+    function getSuggestedUse(lightRaw, hum, rain) {
+        if (rain != null && rain >= 50) return 'Better for indoor activities — heavy rain outside.';
+        if (lightRaw != null && lightRaw < 100) return 'Good time for resting or screen work, but lighting is low.';
+        if (lightRaw != null && lightRaw >= 300 && (rain == null || rain < 10)) {
+            return 'Good for outdoor activities or drying clothes, with enough natural light.';
+        }
+        if (hum != null && hum > 75) return 'May feel a bit sticky — light indoor activities are better.';
+        return 'Suitable for normal indoor activities like studying or working.';
+    }
+
+    // ---------- Wind helpers ----------
+    function getWindAngle(dir) {
+        switch (dir) {
+            case 'N':  return 0;
+            case 'NE': return 45;
+            case 'E':  return 90;
+            case 'SE': return 135;
+            case 'S':  return 180;
+            case 'SW': return 225;
+            case 'W':  return 270;
+            case 'NW': return 315;
+            default: return 0;
+        }
+    }
+
+    // ---------- FAN UI HELPERS ----------
+    function updateFanUIFromState() {
+        if (!fanBadge || !fanStateLabel || !fanToggleInput) return;
+
+        if (!fanState) {
+            fanBadge.textContent = 'Unknown';
+            fanBadge.className = 'fan-badge fan-unknown';
+            fanStateLabel.textContent = '--';
+            fanStateLabel.className = 'fan-state-label';
+            fanToggleInput.checked = false;
+            return;
+        }
+
+        const isOn = fanState === 'ON';
+        fanBadge.textContent = isOn ? 'ON' : 'OFF';
+        fanBadge.className = 'fan-badge ' + (isOn ? 'fan-on' : 'fan-off');
+        fanStateLabel.textContent = isOn ? 'ON' : 'OFF';
+        fanStateLabel.className = 'fan-state-label ' + (isOn ? 'on' : 'off');
+        fanToggleInput.checked = isOn;
+    }
+
+    function attachFanEvents() {
+        if (!fanToggleInput) return;
+
+        fanToggleInput.addEventListener('change', () => {
+            if (!mqttClient || !mqttClient.connected) {
+                // revert toggle if not connected
+                fanToggleInput.checked = fanState === 'ON';
+                return;
+            }
+            const wantOn = fanToggleInput.checked;
+            const msg = wantOn ? 'ON' : 'OFF';
+            mqttClient.publish(TOPIC_FAN_CMD, msg, { qos: 1, retain: true });
+            // optimistic update; will also be updated when status topic is received
+            fanState = msg;
+            updateFanUIFromState();
+        });
+
+        // apply latest state to the UI
+        updateFanUIFromState();
+    }
+
+    // ---------- UPDATE BARS (smooth, no reset) ----------
+    function updateBars() {
+        if (typeof currentData.temp === 'number' && tempBarEl) {
+            const percent = Math.min(100, Math.max(0, (currentData.temp / 50) * 100));
+            requestAnimationFrame(() => {
+                tempBarEl.style.width = percent + '%';
+            });
+        }
+        if (typeof currentData.hum === 'number' && humBarEl) {
+            const percent = Math.min(100, Math.max(0, currentData.hum));
+            requestAnimationFrame(() => {
+                humBarEl.style.width = percent + '%';
+            });
+        }
+        if (typeof currentData.rain === 'number' && rainBarEl) {
+            const percent = Math.min(100, Math.max(0, currentData.rain));
+            requestAnimationFrame(() => {
+                rainBarEl.style.width = percent + '%';
+            });
+        }
+        if (lightBarEl) {
+            const lp = mapLightToPercent(currentData.lightRaw);
+            const percent = typeof lp === 'number' ? lp : 0;
+            requestAnimationFrame(() => {
+                lightBarEl.style.width = percent + '%';
+            });
+        }
+    }
+
+    // ---------- MAIN VIEW UPDATE ----------
+    function updateCurrentWeatherView() {
+        if (currentData.temp === null || currentData.hum === null) return;
+
+        // show layout once data is ready
+        if (weatherLoading.style.display !== 'none') {
+            weatherLoading.style.display = 'none';
+            weatherMain.style.display = 'block';
+        }
+
+        const tempVal = isCelsius ? currentData.temp : (currentData.temp * 9 / 5 + 32);
+        const tempRounded = Math.round(tempVal);
+        const unit = isCelsius ? '°C' : '°F';
+
+        const rainValue = currentData.rain != null ? Math.round(currentData.rain) : null;
+        const rainLabel = getRainLabel(currentData.rain);
+        const rainClass = getRainBadgeClass(currentData.rain);
+
+        const brightnessShort = getLightShortLabel(currentData.lightRaw);
+        const brightnessLabel = getLightLabel(currentData.lightRaw);
+        const lightUsage = getLightUsageText(currentData.lightRaw);
+
+        const comfortSummary = getComfortSummary(currentData.temp, currentData.hum);
+        const suggestedUse = getSuggestedUse(currentData.lightRaw, currentData.hum, currentData.rain);
+
+        const windText = currentData.windDir || '--';
+        const windSpeedDisplay =
+            typeof currentData.windSpeed === 'number'
+                ? currentData.windSpeed.toFixed(2) + ' m/s'
+                : '-- m/s';
+        const windAngle = getWindAngle(windText);
+
+        // Text values
+        tempEl.textContent = tempRounded + unit;
+        humEl.textContent = Math.round(currentData.hum) + '%';
+        rainEl.textContent = (rainValue !== null ? rainValue : '--') + '%';
+        lightEl.textContent = brightnessShort;
+
+        rainBadge.className = 'rain-badge ' + (rainClass || '');
+        rainBadgeText.textContent = rainLabel;
+        lightLabelText.textContent = brightnessLabel;
+        lightUsageText.textContent = lightUsage;
+
+        // Wind
+        windSpeedEl.textContent = windSpeedDisplay;
+        windDirEl.textContent = windText;
+        windNoteEl.textContent =
+            windText !== '--'
+                ? 'Arrow points to where the wind is blowing towards.'
+                : 'Waiting for wind data.';
+        compassNeedleEl.style.transform = `rotate(${windAngle}deg)`;
+
+        // Last update time
+        lastUpdateText.textContent = 'Last update: ' + new Date().toLocaleTimeString();
+
+        // Summary + tags
+        comfortSummaryText.textContent = comfortSummary;
+        suggestedUseText.textContent = suggestedUse;
+        tagTemp.textContent = `Temp: ${tempRounded}${unit}`;
+        tagHum.textContent = `Humidity: ${Math.round(currentData.hum)}%`;
+        tagLight.textContent = `Light: ${brightnessShort}`;
+        tagWind.textContent = `Wind: ${windSpeedDisplay}`;
+
+        // Unit toggle active states
+        if (isCelsius) {
+            celsiusBtn.classList.add('active');
+            fahrenheitBtn.classList.remove('active');
+        } else {
+            fahrenheitBtn.classList.add('active');
+            celsiusBtn.classList.remove('active');
+        }
+
+        // Animate text bump
+        ['temperature', 'humidity', 'rain', 'light', 'wind-speed-value']
+            .forEach(animateValue);
+
+        // Smooth bar movement only (no reset)
+        updateBars();
+    }
+
+    // Recent readings: only push every 5 minutes
+    function renderRecentReadings() {
+        if (!recentReadings.length) {
+            forecastContainer.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Waiting for readings...
                 </div>
             `;
+        } else {
+            forecastContainer.innerHTML = '';
+            recentReadings.slice(-10).forEach(r => {
+                const temp = isCelsius ? r.temp : (r.temp * 9/5 + 32);
+                const unit = isCelsius ? '°C' : '°F';
+                const hum = Math.round(r.hum);
+                const rainLabel = getRainLabel(r.rain);
+                const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
+                const lightLabel = getLightLabel(r.lightRaw);
+                const windText = r.windDir || '--';
+                const windSpeedText =
+                    typeof r.windSpeed === 'number' ? r.windSpeed.toFixed(1) + ' m/s' : '--';
 
-            // unit toggle events
-            document.getElementById('celsius-btn').addEventListener('click', () => {
-                isCelsius = true;
-                updateCurrentWeatherCard();
-                renderRecentReadings();
-            });
-            document.getElementById('fahrenheit-btn').addEventListener('click', () => {
-                isCelsius = false;
-                updateCurrentWeatherCard();
-                renderRecentReadings();
-            });
+                const cond = getDayCondition(r.temp, r.hum, r.rain, r.lightRaw);
 
-            // animate updated values
-            ['temperature', 'humidity', 'rain', 'light', 'wind-speed-value']
-                .forEach(animateValue);
-
-            // --- update the small bars ---
-            const tempBar = document.getElementById('temp-bar');
-            const humBar  = document.getElementById('hum-bar');
-            const rainBar = document.getElementById('rain-bar');
-            const lightBar = document.getElementById('light-bar');
-
-            if (tempBar && typeof currentData.temp === 'number') {
-                const percent = Math.max(0, Math.min(100, (currentData.temp / 50) * 100)); // 0–50°C
-                tempBar.style.width = percent + '%';
-            }
-            if (humBar && typeof currentData.hum === 'number') {
-                const percent = Math.max(0, Math.min(100, currentData.hum)); // 0–100%
-                humBar.style.width = percent + '%';
-            }
-            if (rainBar && typeof currentData.rain === 'number') {
-                const percent = Math.max(0, Math.min(100, currentData.rain)); // 0–100%
-                rainBar.style.width = percent + '%';
-            }
-            if (lightBar) {
-                const lp = mapLightToPercent(currentData.lightRaw);
-                if (typeof lp === 'number') {
-                    lightBar.style.width = lp + '%';
-                } else {
-                    lightBar.style.width = '0%';
-                }
-            }
-
-            // attach fan toggle listeners + sync UI
-            attachFanEvents();
-        }
-
-        // Recent readings: only push every 5 minutes
-        function renderRecentReadings() {
-            if (!recentReadings.length) {
-                forecastContainer.innerHTML = `
-                    <div class="loading">
-                        <div class="spinner"></div>
-                        Waiting for readings...
+                forecastContainer.innerHTML += `
+                    <div class="forecast-day">
+                        <div class="forecast-time">${r.time}</div>
+                        <div class="hour-icon">
+                            <i class="${cond.icon}"></i>
+                        </div>
+                        <div class="hour-temp">${Math.round(temp)}${unit}</div>
+                        <div class="hour-hum">
+                            <i class="fas fa-tint"></i>
+                            <span>${hum}%</span>
+                        </div>
+                        <div class="hour-light">
+                            <i class="fas fa-sun"></i>
+                            <span>${lightLabel}</span>
+                        </div>
+                        <div class="hour-wind">
+                            <i class="fas fa-location-arrow"></i>
+                            <span>${windText} • ${windSpeedText}</span>
+                        </div>
+                        <div class="hour-rain">${rainValue}% • ${rainLabel}</div>
                     </div>
                 `;
-            } else {
-                forecastContainer.innerHTML = '';
-                recentReadings.slice(-10).forEach(r => {
-                    const temp = isCelsius ? r.temp : (r.temp * 9/5 + 32);
-                    const unit = isCelsius ? '°C' : '°F';
-                    const hum = Math.round(r.hum);
-                    const rainLabel = getRainLabel(r.rain);
-                    const rainValue = r.rain != null ? Math.round(r.rain) : 'N/A';
-                    const lightLabel = getLightLabel(r.lightRaw);
-                    const windText = r.windDir || '--';
-                    const windSpeedText =
-                        typeof r.windSpeed === 'number' ? r.windSpeed.toFixed(1) + ' m/s' : '--';
+            });
+        }
+    }
 
-                    const cond = getDayCondition(r.temp, r.hum, r.rain, r.lightRaw);
+    function updateChartWithReading(hum, rain, lightRaw) {
+        if (!humidityChart) return;
+        const timeLabel = new Date().toLocaleTimeString();
+        humidityChart.data.labels.push(timeLabel);
+        humidityChart.data.datasets[0].data.push(hum);
+        humidityChart.data.datasets[1].data.push(
+            typeof rain === 'number' ? rain : null
+        );
 
-                    forecastContainer.innerHTML += `
-                        <div class="forecast-day">
-                            <div class="forecast-time">${r.time}</div>
-                            <div class="hour-icon">
-                                <i class="${cond.icon}"></i>
-                            </div>
-                            <div class="hour-temp">${Math.round(temp)}${unit}</div>
-                            <div class="hour-hum">
-                                <i class="fas fa-tint"></i>
-                                <span>${hum}%</span>
-                            </div>
-                            <div class="hour-light">
-                                <i class="fas fa-sun"></i>
-                                <span>${lightLabel}</span>
-                            </div>
-                            <div class="hour-wind">
-                                <i class="fas fa-location-arrow"></i>
-                                <span>${windText} • ${windSpeedText}</span>
-                            </div>
-                            <div class="hour-rain">${rainValue}% • ${rainLabel}</div>
-                        </div>
-                    `;
-                });
-            }
+        const lightPercent = mapLightToPercent(lightRaw);
+        humidityChart.data.datasets[2].data.push(
+            typeof lightPercent === 'number' ? lightPercent : null
+        );
+
+        if (humidityChart.data.labels.length > 20) {
+            humidityChart.data.labels.shift();
+            humidityChart.data.datasets.forEach(ds => ds.data.shift());
         }
 
-        function updateChartWithReading(hum, rain, lightRaw) {
-            if (!humidityChart) return;
-            const timeLabel = new Date().toLocaleTimeString();
-            humidityChart.data.labels.push(timeLabel);
-            humidityChart.data.datasets[0].data.push(hum);
-            humidityChart.data.datasets[1].data.push(
-                typeof rain === 'number' ? rain : null
-            );
+        humidityChart.update('none');
+    }
 
-            const lightPercent = mapLightToPercent(lightRaw);
-            humidityChart.data.datasets[2].data.push(
-                typeof lightPercent === 'number' ? lightPercent : null
-            );
-
-            if (humidityChart.data.labels.length > 20) {
-                humidityChart.data.labels.shift();
-                humidityChart.data.datasets.forEach(ds => ds.data.shift());
-            }
-
-            humidityChart.update('none');
+    // ---------- MQTT UI status ----------
+    function setMqttStatus(state) {
+        mqttStatusEl.classList.remove('connected', 'reconnecting', 'disconnected');
+        mqttStatusEl.classList.add(state);
+        if (state === 'connected') {
+            mqttStatusText.textContent = 'MQTT: Connected';
+        } else if (state === 'reconnecting') {
+            mqttStatusText.textContent = 'MQTT: Reconnecting...';
+        } else {
+            mqttStatusText.textContent = 'MQTT: Disconnected';
         }
+    }
 
-        // ---------- MQTT UI status ----------
-        function setMqttStatus(state) {
-            mqttStatusEl.classList.remove('connected', 'reconnecting', 'disconnected');
-            mqttStatusEl.classList.add(state);
-            if (state === 'connected') {
-                mqttStatusText.textContent = 'MQTT: Connected';
-            } else if (state === 'reconnecting') {
-                mqttStatusText.textContent = 'MQTT: Reconnecting...';
-            } else {
-                mqttStatusText.textContent = 'MQTT: Disconnected';
-            }
-        }
+    // ---------- MQTT setup ----------
+    function setupMqtt() {
+        const options = {
+            clientId: 'web_' + Math.random().toString(16).substr(2, 8),
+            username: MQTT_USERNAME,
+            password: MQTT_PASSWORD,
+            clean: true,
+            reconnectPeriod: 2000,
+            connectTimeout: 30 * 1000
+        };
 
-        // ---------- MQTT setup ----------
-        function setupMqtt() {
-            const options = {
-                clientId: 'web_' + Math.random().toString(16).substr(2, 8),
-                username: MQTT_USERNAME,
-                password: MQTT_PASSWORD,
-                clean: true,
-                reconnectPeriod: 2000,
-                connectTimeout: 30 * 1000
-            };
+        mqttClient = mqtt.connect(MQTT_HOST, options);
+        setMqttStatus('reconnecting');
 
-            mqttClient = mqtt.connect(MQTT_HOST, options);
+        mqttClient.on('connect', () => {
+            console.log('MQTT connected');
+            setMqttStatus('connected');
+            mqttClient.subscribe(TOPIC_SENSORS, (err) => {
+                if (err) console.error('Subscribe error:', err);
+                else console.log('Subscribed to', TOPIC_SENSORS);
+            });
+            mqttClient.subscribe(TOPIC_FAN_STATUS, (err) => {
+                if (err) console.error('Subscribe fan error:', err);
+                else console.log('Subscribed to', TOPIC_FAN_STATUS);
+            });
+        });
+
+        mqttClient.on('reconnect', () => {
+            console.log('MQTT reconnecting...');
             setMqttStatus('reconnecting');
+        });
 
-            mqttClient.on('connect', () => {
-                console.log('MQTT connected');
-                setMqttStatus('connected');
-                mqttClient.subscribe(TOPIC_SENSORS, (err) => {
-                    if (err) console.error('Subscribe error:', err);
-                    else console.log('Subscribed to', TOPIC_SENSORS);
-                });
-                mqttClient.subscribe(TOPIC_FAN_STATUS, (err) => {
-                    if (err) console.error('Subscribe fan error:', err);
-                    else console.log('Subscribed to', TOPIC_FAN_STATUS);
-                });
-            });
+        mqttClient.on('close', () => {
+            console.log('MQTT connection closed');
+            setMqttStatus('disconnected');
+        });
 
-            mqttClient.on('reconnect', () => {
-                console.log('MQTT reconnecting...');
-                setMqttStatus('reconnecting');
-            });
+        mqttClient.on('error', (err) => {
+            console.error('MQTT error:', err);
+            setMqttStatus('disconnected');
+        });
 
-            mqttClient.on('close', () => {
-                console.log('MQTT connection closed');
-                setMqttStatus('disconnected');
-            });
-
-            mqttClient.on('error', (err) => {
-                console.error('MQTT error:', err);
-                setMqttStatus('disconnected');
-            });
-
-            mqttClient.on('message', (topic, message) => {
-                // handle fan status messages
-                if (topic === TOPIC_FAN_STATUS) {
-                    const payload = message.toString().trim().toUpperCase();
-                    if (payload === 'ON' || payload === 'OFF') {
-                        fanState = payload;
-                        updateFanUIFromState();
-                    }
-                    return;
+        mqttClient.on('message', (topic, message) => {
+            // handle fan status messages
+            if (topic === TOPIC_FAN_STATUS) {
+                const payload = message.toString().trim().toUpperCase();
+                if (payload === 'ON' || payload === 'OFF') {
+                    fanState = payload;
+                    updateFanUIFromState();
                 }
+                return;
+            }
 
-                // handle sensor JSON
-                if (topic === TOPIC_SENSORS) {
-                    try {
-                        const payload = JSON.parse(message.toString());
+            // handle sensor JSON
+            if (topic === TOPIC_SENSORS) {
+                try {
+                    const payload = JSON.parse(message.toString());
 
-                        if (typeof payload.temp === 'number') currentData.temp = payload.temp;
-                        if (typeof payload.hum === 'number') currentData.hum = payload.hum;
-                        if (typeof payload.rain === 'number') currentData.rain = payload.rain;
-                        if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
-                        if (typeof payload.wind_dir === 'string') currentData.windDir = payload.wind_dir;
-                        if (typeof payload.wind_speed === 'number') currentData.windSpeed = payload.wind_speed;
+                    if (typeof payload.temp === 'number') currentData.temp = payload.temp;
+                    if (typeof payload.hum === 'number') currentData.hum = payload.hum;
+                    if (typeof payload.rain === 'number') currentData.rain = payload.rain;
+                    if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
+                    if (typeof payload.wind_dir === 'string') currentData.windDir = payload.wind_dir;
+                    if (typeof payload.wind_speed === 'number') currentData.windSpeed = payload.wind_speed;
 
-                        if (currentData.temp != null && currentData.hum != null) {
-                            const now = Date.now();
-                            if (lastRecentTimestamp === 0 || now - lastRecentTimestamp >= 5 * 60 * 1000) {
-                                lastRecentTimestamp = now;
-                                recentReadings.push({
-                                    time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-                                    temp: currentData.temp,
-                                    hum: currentData.hum,
-                                    rain: currentData.rain,
-                                    lightRaw: currentData.lightRaw,
-                                    windDir: currentData.windDir,
-                                    windSpeed: currentData.windSpeed
-                                });
-                                renderRecentReadings();
-                            }
-
-                            updateCurrentWeatherCard();
-                            updateDayStatus();
-                            updateChartWithReading(currentData.hum, currentData.rain, currentData.lightRaw);
+                    if (currentData.temp != null && currentData.hum != null) {
+                        const now = Date.now();
+                        if (lastRecentTimestamp === 0 || now - lastRecentTimestamp >= 5 * 60 * 1000) {
+                            lastRecentTimestamp = now;
+                            recentReadings.push({
+                                time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+                                temp: currentData.temp,
+                                hum: currentData.hum,
+                                rain: currentData.rain,
+                                lightRaw: currentData.lightRaw,
+                                windDir: currentData.windDir,
+                                windSpeed: currentData.windSpeed
+                            });
+                            renderRecentReadings();
                         }
-                    } catch (e) {
-                        console.error('Invalid JSON payload:', message.toString(), e);
+
+                        updateCurrentWeatherView();
+                        updateDayStatus();
+                        updateChartWithReading(currentData.hum, currentData.rain, currentData.lightRaw);
                     }
+                } catch (e) {
+                    console.error('Invalid JSON payload:', message.toString(), e);
                 }
-            });
-        }
-
-        // ---------- Dark mode toggle ----------
-        toggleModeBtn.addEventListener('click', () => {
-            document.body.classList.toggle('dark-mode');
-            toggleModeBtn.innerHTML = document.body.classList.contains('dark-mode')
-                ? '<i class="fas fa-sun"></i> Light Mode'
-                : '<i class="fas fa-moon"></i> Dark Mode';
+            }
         });
+    }
 
-        // ---------- Init ----------
-        window.addEventListener('load', () => {
-            initChart();
-            setupMqtt();
-        });
-    </script>
+    // ---------- Dark mode toggle ----------
+    toggleModeBtn.addEventListener('click', () => {
+        document.body.classList.toggle('dark-mode');
+        toggleModeBtn.innerHTML = document.body.classList.contains('dark-mode')
+            ? '<i class="fas fa-sun"></i> Light Mode'
+            : '<i class="fas fa-moon"></i> Dark Mode';
+    });
+
+    // ---------- Unit toggle events ----------
+    celsiusBtn.addEventListener('click', () => {
+        isCelsius = true;
+        updateCurrentWeatherView();
+        renderRecentReadings();
+    });
+    fahrenheitBtn.addEventListener('click', () => {
+        isCelsius = false;
+        updateCurrentWeatherView();
+        renderRecentReadings();
+    });
+
+    // ---------- Init ----------
+    window.addEventListener('load', () => {
+        initChart();
+        setupMqtt();
+        attachFanEvents();
+    });
+</script>
 </body>
 </html>
