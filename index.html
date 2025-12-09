@@ -633,6 +633,116 @@
             border-radius: 999px;
         }
 
+        /* FAN CARD + TOGGLE */
+        .fan-card {
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            margin-top: 6px;
+        }
+        .fan-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+        .fan-card-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.95rem;
+        }
+        .fan-card-title i {
+            color: #22c55e;
+        }
+        .fan-badge {
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.8);
+        }
+        .fan-badge.fan-on {
+            background: rgba(34, 197, 94, 0.15);
+            border-color: rgba(34, 197, 94, 0.9);
+            color: #bbf7d0;
+        }
+        .fan-badge.fan-off {
+            background: rgba(239, 68, 68, 0.12);
+            border-color: rgba(239, 68, 68, 0.9);
+            color: #fecaca;
+        }
+        .fan-badge.fan-unknown {
+            background: rgba(148, 163, 184, 0.15);
+            border-color: rgba(148, 163, 184, 0.9);
+            color: #e5e7eb;
+        }
+        .fan-card-body {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+        .fan-state-text {
+            display: flex;
+            flex-direction: column;
+            font-size: 0.85rem;
+        }
+        .fan-state-label {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .fan-state-label.on {
+            color: #4ade80;
+        }
+        .fan-state-label.off {
+            color: #f97373;
+        }
+
+        .fan-hint {
+            font-size: 0.75rem;
+            opacity: 0.8;
+            margin-top: 2px;
+        }
+
+        .fan-toggle {
+            position: relative;
+            width: 54px;
+            height: 28px;
+        }
+        .fan-toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .fan-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background-color: #4b5563;
+            border-radius: 999px;
+            transition: .25s;
+        }
+        .fan-slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            top: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: .25s;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        .fan-toggle input:checked + .fan-slider {
+            background-color: #22c55e;
+        }
+        .fan-toggle input:checked + .fan-slider:before {
+            transform: translateX(24px);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             header {
@@ -717,14 +827,26 @@
         let humidityChart;
         let isCelsius = true; // assume ESP sends °C
 
+        // MQTT client + fan topics
+        let mqttClient = null;
+        const MQTT_HOST = 'wss://1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud:8884/mqtt';
+        const MQTT_USERNAME = 'hivemq.webclient.1764536797209';
+        const MQTT_PASSWORD = '8mN37GwZr,Lc!u>$PJ1e';
+
+        const TOPIC_SENSORS    = 'esp32/sensors';
+        const TOPIC_FAN_CMD    = 'esp32/fan/cmd';
+        const TOPIC_FAN_STATUS = 'esp32/fan/status';
+
+        let fanState = null; // "ON" / "OFF" / null
+
         // Now track wind speed too
-        let currentData = { 
-            temp: null, 
-            hum: null, 
-            rain: null, 
-            lightRaw: null, 
+        let currentData = {
+            temp: null,
+            hum: null,
+            rain: null,
+            lightRaw: null,
             windDir: null,
-            windSpeed: null 
+            windSpeed: null
         };
         let recentReadings = []; // { time, temp, hum, rain, lightRaw, windDir, windSpeed }
         let lastRecentTimestamp = 0; // for 5-minute readings
@@ -772,7 +894,7 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { 
+                        legend: {
                             display: true,
                             labels: {
                                 color: '#f9fafb',
@@ -781,11 +903,11 @@
                         }
                     },
                     scales: {
-                        y: { 
-                            beginAtZero: true, 
+                        y: {
+                            beginAtZero: true,
                             max: 100,
-                            title: { 
-                                display: true, 
+                            title: {
+                                display: true,
                                 text: 'Percentage / Level',
                                 color: '#e5e7eb',
                                 font: { size: 12 }
@@ -796,9 +918,9 @@
                             },
                             grid: { color: 'rgba(148, 163, 184, 0.35)' }
                         },
-                        x: { 
-                            title: { 
-                                display: true, 
+                        x: {
+                            title: {
+                                display: true,
                                 text: 'Time',
                                 color: '#e5e7eb',
                                 font: { size: 12 }
@@ -945,6 +1067,53 @@
             }
         }
 
+        // ---------- FAN UI HELPERS ----------
+        function updateFanUIFromState() {
+            const badge = document.getElementById('fan-status-badge');
+            const label = document.getElementById('fan-state-label');
+            const toggle = document.getElementById('fan-toggle-input');
+
+            if (!badge || !label || !toggle) return;
+
+            if (!fanState) {
+                badge.textContent = 'Unknown';
+                badge.className = 'fan-badge fan-unknown';
+                label.textContent = '--';
+                label.className = 'fan-state-label';
+                toggle.checked = false;
+                return;
+            }
+
+            const isOn = fanState === 'ON';
+            badge.textContent = isOn ? 'ON' : 'OFF';
+            badge.className = 'fan-badge ' + (isOn ? 'fan-on' : 'fan-off');
+            label.textContent = isOn ? 'ON' : 'OFF';
+            label.className = 'fan-state-label ' + (isOn ? 'on' : 'off');
+            toggle.checked = isOn;
+        }
+
+        function attachFanEvents() {
+            const toggle = document.getElementById('fan-toggle-input');
+            if (!toggle) return;
+
+            toggle.addEventListener('change', () => {
+                if (!mqttClient || !mqttClient.connected) {
+                    // revert toggle if not connected
+                    toggle.checked = fanState === 'ON';
+                    return;
+                }
+                const wantOn = toggle.checked;
+                const msg = wantOn ? 'ON' : 'OFF';
+                mqttClient.publish(TOPIC_FAN_CMD, msg, { qos: 1, retain: true });
+                // optimistic update; will also be updated when status topic is received
+                fanState = msg;
+                updateFanUIFromState();
+            });
+
+            // apply latest state to the newly rendered UI
+            updateFanUIFromState();
+        }
+
         // ---------- UI helpers ----------
         function updateCurrentWeatherCard() {
             if (currentData.temp === null || currentData.hum === null) return;
@@ -965,7 +1134,7 @@
             const suggestedUse = getSuggestedUse(currentData.lightRaw, currentData.hum, currentData.rain);
 
             const windText = currentData.windDir || '--';
-            const windSpeedDisplay = 
+            const windSpeedDisplay =
                 typeof currentData.windSpeed === 'number'
                     ? currentData.windSpeed.toFixed(2) + ' m/s'
                     : '-- m/s';
@@ -1082,6 +1251,30 @@
                                 <span class="summary-tag">Wind: ${windSpeedDisplay}</span>
                             </div>
                         </div>
+
+                        <!-- FAN CONTROL CARD -->
+                        <div class="fan-card">
+                            <div class="fan-card-header">
+                                <div class="fan-card-title">
+                                    <i class="fas fa-fan"></i>
+                                    <span>Fan Control</span>
+                                </div>
+                                <span id="fan-status-badge" class="fan-badge fan-unknown">Unknown</span>
+                            </div>
+                            <div class="fan-card-body">
+                                <div class="fan-state-text">
+                                    <span>Fan is currently</span>
+                                    <span id="fan-state-label" class="fan-state-label">--</span>
+                                </div>
+                                <label class="fan-toggle">
+                                    <input type="checkbox" id="fan-toggle-input">
+                                    <span class="fan-slider"></span>
+                                </label>
+                            </div>
+                            <p class="fan-hint">
+                                This switch sends <code>ON</code>/<code>OFF</code> commands to the ESP32 relay via MQTT.
+                            </p>
+                        </div>
                     </div>
                 </div>
                 <div class="unit-toggle">
@@ -1132,6 +1325,9 @@
                     lightBar.style.width = '0%';
                 }
             }
+
+            // attach fan toggle listeners + sync UI
+            attachFanEvents();
         }
 
         // Recent readings: only push every 5 minutes
@@ -1221,79 +1417,92 @@
 
         // ---------- MQTT setup ----------
         function setupMqtt() {
-            const host = 'wss://1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud:8884/mqtt';
-
             const options = {
                 clientId: 'web_' + Math.random().toString(16).substr(2, 8),
-                username: 'hivemq.webclient.1764536797209',
-                password: '8mN37GwZr,Lc!u>$PJ1e',
+                username: MQTT_USERNAME,
+                password: MQTT_PASSWORD,
                 clean: true,
                 reconnectPeriod: 2000,
                 connectTimeout: 30 * 1000
             };
 
-            const client = mqtt.connect(host, options);
+            mqttClient = mqtt.connect(MQTT_HOST, options);
             setMqttStatus('reconnecting');
 
-            client.on('connect', () => {
+            mqttClient.on('connect', () => {
                 console.log('MQTT connected');
                 setMqttStatus('connected');
-                client.subscribe('esp32/sensors', (err) => {
+                mqttClient.subscribe(TOPIC_SENSORS, (err) => {
                     if (err) console.error('Subscribe error:', err);
-                    else console.log('Subscribed to esp32/sensors');
+                    else console.log('Subscribed to', TOPIC_SENSORS);
+                });
+                mqttClient.subscribe(TOPIC_FAN_STATUS, (err) => {
+                    if (err) console.error('Subscribe fan error:', err);
+                    else console.log('Subscribed to', TOPIC_FAN_STATUS);
                 });
             });
 
-            client.on('reconnect', () => {
+            mqttClient.on('reconnect', () => {
                 console.log('MQTT reconnecting...');
                 setMqttStatus('reconnecting');
             });
 
-            client.on('close', () => {
+            mqttClient.on('close', () => {
                 console.log('MQTT connection closed');
                 setMqttStatus('disconnected');
             });
 
-            client.on('error', (err) => {
+            mqttClient.on('error', (err) => {
                 console.error('MQTT error:', err);
                 setMqttStatus('disconnected');
             });
 
-            client.on('message', (topic, message) => {
-                try {
-                    const payload = JSON.parse(message.toString());
-
-                    if (typeof payload.temp === 'number') currentData.temp = payload.temp;
-                    if (typeof payload.hum === 'number') currentData.hum = payload.hum;
-                    if (typeof payload.rain === 'number') currentData.rain = payload.rain;
-                    if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
-                    // NEW: parse wind direction and speed from JSON:
-                    // firmware sends: wind_dir (string), wind_speed (number)
-                    if (typeof payload.wind_dir === 'string') currentData.windDir = payload.wind_dir;
-                    if (typeof payload.wind_speed === 'number') currentData.windSpeed = payload.wind_speed;
-
-                    if (currentData.temp != null && currentData.hum != null) {
-                        const now = Date.now();
-                        if (lastRecentTimestamp === 0 || now - lastRecentTimestamp >= 5 * 60 * 1000) {
-                            lastRecentTimestamp = now;
-                            recentReadings.push({
-                                time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-                                temp: currentData.temp,
-                                hum: currentData.hum,
-                                rain: currentData.rain,
-                                lightRaw: currentData.lightRaw,
-                                windDir: currentData.windDir,
-                                windSpeed: currentData.windSpeed
-                            });
-                            renderRecentReadings();
-                        }
-
-                        updateCurrentWeatherCard();
-                        updateDayStatus();
-                        updateChartWithReading(currentData.hum, currentData.rain, currentData.lightRaw);
+            mqttClient.on('message', (topic, message) => {
+                // handle fan status messages
+                if (topic === TOPIC_FAN_STATUS) {
+                    const payload = message.toString().trim().toUpperCase();
+                    if (payload === 'ON' || payload === 'OFF') {
+                        fanState = payload;
+                        updateFanUIFromState();
                     }
-                } catch (e) {
-                    console.error('Invalid JSON payload:', message.toString(), e);
+                    return;
+                }
+
+                // handle sensor JSON
+                if (topic === TOPIC_SENSORS) {
+                    try {
+                        const payload = JSON.parse(message.toString());
+
+                        if (typeof payload.temp === 'number') currentData.temp = payload.temp;
+                        if (typeof payload.hum === 'number') currentData.hum = payload.hum;
+                        if (typeof payload.rain === 'number') currentData.rain = payload.rain;
+                        if (typeof payload.lux === 'number') currentData.lightRaw = payload.lux;
+                        if (typeof payload.wind_dir === 'string') currentData.windDir = payload.wind_dir;
+                        if (typeof payload.wind_speed === 'number') currentData.windSpeed = payload.wind_speed;
+
+                        if (currentData.temp != null && currentData.hum != null) {
+                            const now = Date.now();
+                            if (lastRecentTimestamp === 0 || now - lastRecentTimestamp >= 5 * 60 * 1000) {
+                                lastRecentTimestamp = now;
+                                recentReadings.push({
+                                    time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+                                    temp: currentData.temp,
+                                    hum: currentData.hum,
+                                    rain: currentData.rain,
+                                    lightRaw: currentData.lightRaw,
+                                    windDir: currentData.windDir,
+                                    windSpeed: currentData.windSpeed
+                                });
+                                renderRecentReadings();
+                            }
+
+                            updateCurrentWeatherCard();
+                            updateDayStatus();
+                            updateChartWithReading(currentData.hum, currentData.rain, currentData.lightRaw);
+                        }
+                    } catch (e) {
+                        console.error('Invalid JSON payload:', message.toString(), e);
+                    }
                 }
             });
         }
