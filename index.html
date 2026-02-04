@@ -5,127 +5,485 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Smart Door Monitor</title>
   <style>
-    body { font-family: Arial, sans-serif; background:#0b0f14; color:#e6edf3; margin:0; padding:24px; }
-    .wrap { max-width: 720px; margin: 0 auto; }
-    .card { background:#121822; border:1px solid #233044; border-radius:16px; padding:18px; }
-    .row { display:flex; gap:16px; flex-wrap:wrap; }
-    .pill { padding:6px 10px; border-radius:999px; background:#1c2533; border:1px solid #2a3a52; font-size:12px; }
-    .status {
-      margin-top:16px;
-      display:flex; align-items:center; justify-content:space-between; gap:16px;
-      padding:18px; border-radius:16px; border:1px solid #2a3a52; background:#0f1520;
+    :root{
+      --bg:#0b1020;
+      --card:#121a33;
+      --stroke:#233059;
+      --text:#e9eefc;
+      --muted:#a9b4d6;
+      --good:#25d366;
+      --bad:#ff4d4d;
+      --warn:#ffb020;
+      --shadow: 0 14px 40px rgba(0,0,0,.35);
+      --radius: 18px;
     }
-    .big { font-size:44px; font-weight:800; letter-spacing:1px; }
-    .muted { color:#9fb1c7; font-size:13px; }
-    .dot { width:12px; height:12px; border-radius:50%; background:#666; box-shadow: 0 0 0 4px rgba(255,255,255,0.03); }
-    .ok { background:#2ecc71; }
-    .bad { background:#e74c3c; }
-    .btn { cursor:pointer; padding:10px 12px; border-radius:12px; border:1px solid #2a3a52; background:#121822; color:#e6edf3; }
-    input { width:100%; padding:10px 12px; border-radius:12px; border:1px solid #2a3a52; background:#0f1520; color:#e6edf3; }
-    label { display:block; margin:10px 0 6px; font-size:12px; color:#9fb1c7; }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: radial-gradient(900px 500px at 20% 10%, rgba(60,120,255,.18), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(255,80,120,.12), transparent 60%),
+                  var(--bg);
+      color:var(--text);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:24px;
+    }
+    .app{
+      width:min(980px, 100%);
+      display:grid;
+      grid-template-columns: 1.3fr .9fr;
+      gap:18px;
+    }
+    @media (max-width: 860px){
+      .app{grid-template-columns:1fr}
+    }
+    .panel{
+      background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      border:1px solid rgba(255,255,255,.10);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+      overflow:hidden;
+    }
+    header{
+      padding:18px 18px 14px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:14px;
+    }
+    header h1{
+      margin:0;
+      font-size:18px;
+      letter-spacing:.3px;
+    }
+    header p{
+      margin:6px 0 0;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.4;
+    }
+    .statusWrap{padding:18px;}
+    .statusCard{
+      background: var(--card);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius: 18px;
+      padding:18px;
+      position:relative;
+      overflow:hidden;
+    }
+    .statusTop{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .pill{
+      font-size:12px;
+      padding:6px 10px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      color:var(--muted);
+      background: rgba(255,255,255,.04);
+    }
+    .big{
+      margin:14px 0 6px;
+      font-size:44px;
+      letter-spacing:1px;
+      font-weight:800;
+      line-height:1;
+    }
+    .sub{
+      color:var(--muted);
+      font-size:14px;
+      margin:0;
+    }
+    .accentBar{
+      position:absolute;
+      left:0; top:0; bottom:0;
+      width:10px;
+      background: var(--warn);
+    }
+    .metaRow{
+      margin-top:14px;
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .meta{
+      background: rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      padding:12px;
+    }
+    .meta .k{font-size:12px;color:var(--muted)}
+    .meta .v{font-size:14px;margin-top:4px}
+    .controls{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:14px;
+    }
+    button{
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06);
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:14px;
+      cursor:pointer;
+      font-weight:600;
+      font-size:13px;
+    }
+    button:hover{background: rgba(255,255,255,.09)}
+    button.primary{
+      border-color: rgba(120,160,255,.35);
+      background: rgba(120,160,255,.18);
+    }
+    button.danger{
+      border-color: rgba(255,80,80,.35);
+      background: rgba(255,80,80,.16);
+    }
+    .rightPad{padding:18px}
+    .form{
+      display:grid;
+      gap:10px;
+    }
+    label{font-size:12px;color:var(--muted)}
+    input{
+      width:100%;
+      padding:10px 12px;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.25);
+      color:var(--text);
+      outline:none;
+    }
+    .row2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:10px;
+    }
+    .log{
+      margin-top:14px;
+      background: rgba(0,0,0,.22);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius: 14px;
+      overflow:hidden;
+    }
+    .logHead{
+      display:flex;
+      justify-content:space-between;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(255,255,255,.08);
+      color:var(--muted);
+      font-size:12px;
+    }
+    .logList{
+      max-height: 260px;
+      overflow:auto;
+      padding:10px 12px;
+      display:grid;
+      gap:8px;
+    }
+    .item{
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .item b{color:var(--text); font-weight:700}
+    .dot{
+      width:10px;height:10px;border-radius:50%;
+      display:inline-block;
+      margin-right:8px;
+      vertical-align:middle;
+    }
+    /* Toast */
+    .toast{
+      position:fixed;
+      right:18px;
+      bottom:18px;
+      width:min(360px, calc(100% - 36px));
+      background: rgba(18,26,51,.96);
+      border:1px solid rgba(255,255,255,.12);
+      box-shadow: var(--shadow);
+      border-radius: 18px;
+      padding:14px;
+      transform: translateY(20px);
+      opacity:0;
+      pointer-events:none;
+      transition: .22s ease;
+    }
+    .toast.show{
+      transform: translateY(0);
+      opacity:1;
+    }
+    .toastTop{
+      display:flex;align-items:center;justify-content:space-between;gap:10px;
+    }
+    .toastTitle{margin:0;font-size:14px;font-weight:800}
+    .toastMsg{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.35}
+    .tiny{font-size:11px;color:var(--muted);margin-top:8px}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h2 style="margin:0 0 12px;">Smart Door Monitoring</h2>
-
-    <div class="card">
-      <div class="row">
-        <div class="pill" id="connPill">Disconnected</div>
-        <div class="pill" id="topicPill">Topic: smartdoor/state</div>
-      </div>
-
-      <div class="status">
+  <div class="app">
+    <!-- LEFT: STATUS -->
+    <section class="panel">
+      <header>
         <div>
-          <div class="muted">Door State</div>
-          <div class="big" id="doorText">---</div>
-          <div class="muted" id="lastMsg">No data yet</div>
+          <h1>Smart Door Monitor</h1>
+          <p>Live status via HiveMQ Cloud (WSS). Subscribed to <b>smartdoor/state</b> + <b>smartdoor/json</b>.</p>
         </div>
-        <div style="text-align:right;">
-          <div class="muted">Broker</div>
-          <div style="font-size:13px;" id="brokerText">—</div>
-          <div style="display:flex; justify-content:flex-end; margin-top:10px;">
-            <div class="dot" id="connDot"></div>
+        <div class="pill" id="connPill">Disconnected</div>
+      </header>
+
+      <div class="statusWrap">
+        <div class="statusCard" id="statusCard">
+          <div class="accentBar" id="accentBar"></div>
+
+          <div class="statusTop">
+            <div class="pill" id="topicPill">Topic: smartdoor/state</div>
+            <div class="pill" id="qualityPill">—</div>
+          </div>
+
+          <div class="big" id="bigState">—</div>
+          <p class="sub" id="subState">Waiting for messages…</p>
+
+          <div class="metaRow">
+            <div class="meta">
+              <div class="k">Last update</div>
+              <div class="v" id="lastUpdate">—</div>
+            </div>
+            <div class="meta">
+              <div class="k">Last JSON</div>
+              <div class="v" id="lastJson">—</div>
+            </div>
+          </div>
+
+          <div class="controls">
+            <button class="primary" id="btnConnect">Connect</button>
+            <button class="danger" id="btnDisconnect">Disconnect</button>
+            <button id="btnClear">Clear Log</button>
+            <button id="btnSound">Sound: OFF</button>
           </div>
         </div>
-      </div>
 
-      <details style="margin-top:14px;">
-        <summary class="btn">Connection settings</summary>
-
-        <label>Broker host (HiveMQ cluster)</label>
-        <input id="host" placeholder="e.g. xxxxx.s1.eu.hivemq.cloud" />
-
-        <label>WebSocket TLS port</label>
-        <input id="port" value="8884" />
-
-        <label>Username</label>
-        <input id="user" placeholder="hivemq.webclient...." />
-
-        <label>Password</label>
-        <input id="pass" type="password" placeholder="your password" />
-
-        <label>Topic</label>
-        <input id="topic" value="smartdoor/state" />
-
-        <div class="row" style="margin-top:12px;">
-          <button class="btn" id="btnConnect">Connect</button>
-          <button class="btn" id="btnDisconnect">Disconnect</button>
+        <div class="log">
+          <div class="logHead">
+            <span>Event log</span>
+            <span id="logCount">0</span>
+          </div>
+          <div class="logList" id="logList"></div>
         </div>
-      </details>
-    </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: SETTINGS -->
+    <aside class="panel">
+      <header>
+        <div>
+          <h1>Connection</h1>
+          <p>Uses MQTT over WebSocket Secure. Keep <b>/mqtt</b> path.</p>
+        </div>
+      </header>
+
+      <div class="rightPad">
+        <div class="form">
+          <div>
+            <label>WSS Host</label>
+            <input id="host" value="1fd0a0a8829f48de9cd09299d2eaae06.s1.eu.hivemq.cloud" />
+          </div>
+
+          <div class="row2">
+            <div>
+              <label>Port</label>
+              <input id="port" value="8884" />
+            </div>
+            <div>
+              <label>Path</label>
+              <input id="path" value="/mqtt" />
+            </div>
+          </div>
+
+          <div>
+            <label>Username</label>
+            <input id="user" value="hivemq.webclient.1764536797209" />
+          </div>
+
+          <div>
+            <label>Password</label>
+            <input id="pass" type="password" placeholder="paste password here" />
+          </div>
+
+          <div class="row2">
+            <div>
+              <label>Topic (text)</label>
+              <input id="topicState" value="smartdoor/state" />
+            </div>
+            <div>
+              <label>Topic (json)</label>
+              <input id="topicJson" value="smartdoor/json" />
+            </div>
+          </div>
+
+          <p class="tiny">
+            Tip: if you see “Connected” but no data, check that ESP32 publishes to the same topics.
+          </p>
+        </div>
+      </div>
+    </aside>
   </div>
 
-  <!-- MQTT.js (browser) -->
+  <!-- Toast -->
+  <div class="toast" id="toast">
+    <div class="toastTop">
+      <p class="toastTitle" id="toastTitle">Door Update</p>
+      <span class="pill" id="toastPill">—</span>
+    </div>
+    <p class="toastMsg" id="toastMsg">—</p>
+    <div class="tiny" id="toastTime">—</div>
+  </div>
+
+  <!-- MQTT.js (browser bundle) -->
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script>
     let client = null;
+    let lastState = null;
+    let soundOn = false;
 
-    const elDoor = document.getElementById("doorText");
-    const elLast = document.getElementById("lastMsg");
-    const elDot  = document.getElementById("connDot");
-    const elPill = document.getElementById("connPill");
-    const elBrokerText = document.getElementById("brokerText");
-    const elTopicPill  = document.getElementById("topicPill");
+    const el = (id) => document.getElementById(id);
 
-    function setConn(ok, text){
-      elDot.className = "dot " + (ok ? "ok" : "");
-      elPill.textContent = text;
-      elPill.style.background = ok ? "#14301f" : "#1c2533";
-      elPill.style.borderColor = ok ? "#2ecc71" : "#2a3a52";
+    const connPill = el("connPill");
+    const bigState = el("bigState");
+    const subState = el("subState");
+    const lastUpdate = el("lastUpdate");
+    const lastJson = el("lastJson");
+    const qualityPill = el("qualityPill");
+    const accentBar = el("accentBar");
+
+    const logList = el("logList");
+    const logCount = el("logCount");
+
+    const toast = el("toast");
+    const toastTitle = el("toastTitle");
+    const toastMsg = el("toastMsg");
+    const toastPill = el("toastPill");
+    const toastTime = el("toastTime");
+
+    function nowStr(){
+      return new Date().toLocaleString();
     }
 
-    function applyState(state){
-      const s = (state || "").toUpperCase().trim();
-      elDoor.textContent = s || "---";
-
-      // color
-      if (s === "OPEN") {
-        elDoor.style.color = "#2ecc71";
-      } else if (s === "CLOSED") {
-        elDoor.style.color = "#e74c3c";
+    function setConn(state){
+      if (state === "connected"){
+        connPill.textContent = "Connected";
+        connPill.style.color = "#cfe3ff";
+        connPill.style.borderColor = "rgba(120,160,255,.45)";
+        connPill.style.background = "rgba(120,160,255,.18)";
+      } else if (state === "connecting"){
+        connPill.textContent = "Connecting…";
+        connPill.style.color = "#ffe9c7";
+        connPill.style.borderColor = "rgba(255,176,32,.45)";
+        connPill.style.background = "rgba(255,176,32,.14)";
       } else {
-        elDoor.style.color = "#e6edf3";
+        connPill.textContent = "Disconnected";
+        connPill.style.color = "#ffd2d2";
+        connPill.style.borderColor = "rgba(255,80,80,.45)";
+        connPill.style.background = "rgba(255,80,80,.12)";
       }
-      elLast.textContent = "Updated: " + new Date().toLocaleString();
+    }
+
+    function setStateUI(state){
+      const upper = (state || "—").toUpperCase();
+      bigState.textContent = upper;
+
+      if (upper === "OPEN"){
+        accentBar.style.background = "var(--good)";
+        subState.textContent = "Door is open. Not secured.";
+      } else if (upper === "CLOSED"){
+        accentBar.style.background = "var(--bad)";
+        subState.textContent = "Door is closed. Secured.";
+      } else {
+        accentBar.style.background = "var(--warn)";
+        subState.textContent = "Waiting for messages…";
+      }
+    }
+
+    function logEvent(label, value){
+      const item = document.createElement("div");
+      item.className = "item";
+
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.style.background =
+        (value === "OPEN") ? "var(--good)" :
+        (value === "CLOSED") ? "var(--bad)" : "var(--warn)";
+
+      const left = document.createElement("div");
+      left.innerHTML = `${dot.outerHTML}<b>${label}</b> — ${value}`;
+
+      const right = document.createElement("div");
+      right.textContent = new Date().toLocaleTimeString();
+
+      item.appendChild(left);
+      item.appendChild(right);
+      logList.prepend(item);
+
+      logCount.textContent = logList.children.length;
+    }
+
+    function showToast(state){
+      toastTitle.textContent = "Door Status Changed";
+      toastPill.textContent = state;
+      toastPill.style.background =
+        (state === "OPEN") ? "rgba(37,211,102,.14)" :
+        (state === "CLOSED") ? "rgba(255,77,77,.14)" : "rgba(255,176,32,.14)";
+      toastPill.style.borderColor =
+        (state === "OPEN") ? "rgba(37,211,102,.35)" :
+        (state === "CLOSED") ? "rgba(255,77,77,.35)" : "rgba(255,176,32,.35)";
+
+      toastMsg.textContent =
+        (state === "OPEN") ? "Door opened. Check immediately." :
+        (state === "CLOSED") ? "Door closed. Secured." :
+        "Update received.";
+
+      toastTime.textContent = nowStr();
+
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 3200);
+
+      if (soundOn) {
+        // tiny beep (no file)
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = "sine";
+        o.frequency.value = (state === "OPEN") ? 880 : 520;
+        g.gain.value = 0.05;
+        o.connect(g); g.connect(ctx.destination);
+        o.start();
+        setTimeout(() => { o.stop(); ctx.close(); }, 120);
+      }
     }
 
     function connect(){
-      const host = document.getElementById("host").value.trim();
-      const port = document.getElementById("port").value.trim();
-      const user = document.getElementById("user").value.trim();
-      const pass = document.getElementById("pass").value;
-      const topic = document.getElementById("topic").value.trim() || "smartdoor/state";
+      const host = el("host").value.trim();
+      const port = el("port").value.trim();
+      const path = el("path").value.trim();
+      const user = el("user").value.trim();
+      const pass = el("pass").value;
 
-      if(!host){ alert("Put broker host"); return; }
+      const tState = el("topicState").value.trim();
+      const tJson  = el("topicJson").value.trim();
 
-      const url = `wss://${host}:${port}/mqtt`;
-      elBrokerText.textContent = url;
-      elTopicPill.textContent = "Topic: " + topic;
+      const url = `wss://${host}:${port}${path}`;
 
-      if(client){ client.end(true); client = null; }
-
-      setConn(false, "Connecting...");
+      setConn("connecting");
 
       client = mqtt.connect(url, {
         username: user,
@@ -136,45 +494,79 @@
       });
 
       client.on("connect", () => {
-        setConn(true, "Connected");
-        client.subscribe(topic, { qos: 0 }, (err) => {
-          if(err) console.log("sub err", err);
-        });
+        setConn("connected");
+        qualityPill.textContent = "Subscribed";
+        client.subscribe([tState, tJson], { qos: 0 });
+        logEvent("MQTT", "CONNECTED");
       });
 
-      client.on("reconnect", () => setConn(false, "Reconnecting..."));
-      client.on("close", () => setConn(false, "Disconnected"));
-      client.on("error", (e) => { console.log(e); setConn(false, "Error"); });
+      client.on("reconnect", () => {
+        setConn("connecting");
+        qualityPill.textContent = "Reconnecting…";
+      });
 
-      client.on("message", (t, payload) => {
+      client.on("close", () => {
+        setConn("disconnected");
+        qualityPill.textContent = "—";
+        logEvent("MQTT", "DISCONNECTED");
+      });
+
+      client.on("error", (err) => {
+        setConn("disconnected");
+        qualityPill.textContent = "Error";
+        logEvent("ERROR", err?.message || "unknown");
+      });
+
+      client.on("message", (topic, payload) => {
         const msg = payload.toString();
-        // accept plain OPEN/CLOSED or JSON
-        try {
-          if(msg.trim().startsWith("{")){
-            const obj = JSON.parse(msg);
-            if(obj.state) applyState(obj.state);
-            else applyState(msg);
-          } else {
-            applyState(msg);
+
+        if (topic === tState) {
+          const state = msg.trim().toUpperCase();
+          lastUpdate.textContent = nowStr();
+          setStateUI(state);
+          logEvent("STATE", state);
+
+          if (lastState !== null && state !== lastState) {
+            showToast(state);
           }
-        } catch {
-          applyState(msg);
+          lastState = state;
+        }
+
+        if (topic === tJson) {
+          lastJson.textContent = msg.length > 64 ? msg.slice(0, 64) + "…" : msg;
         }
       });
     }
 
     function disconnect(){
-      if(client){
+      if (client){
         client.end(true);
         client = null;
       }
-      setConn(false, "Disconnected");
+      setConn("disconnected");
+      qualityPill.textContent = "—";
     }
 
-    document.getElementById("btnConnect").addEventListener("click", connect);
-    document.getElementById("btnDisconnect").addEventListener("click", disconnect);
+    el("btnConnect").addEventListener("click", () => {
+      disconnect();
+      connect();
+    });
 
-    // nice default if you want: auto-fill from localStorage
+    el("btnDisconnect").addEventListener("click", () => disconnect());
+
+    el("btnClear").addEventListener("click", () => {
+      logList.innerHTML = "";
+      logCount.textContent = "0";
+    });
+
+    el("btnSound").addEventListener("click", () => {
+      soundOn = !soundOn;
+      el("btnSound").textContent = soundOn ? "Sound: ON" : "Sound: OFF";
+    });
+
+    // nice default UI
+    setConn("disconnected");
+    setStateUI(null);
   </script>
 </body>
 </html>
